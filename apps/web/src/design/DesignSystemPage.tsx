@@ -14,6 +14,7 @@ import {
   KeyCap,
   ToolButton,
   ToolGroup,
+  ToolValueGroup,
 } from "@slopcad/ui/components/cockpit/tool-button";
 import type { ReactElement, ReactNode } from "react";
 
@@ -270,7 +271,7 @@ export function DesignSystemPage(): ReactElement {
 
       <Block
         title="Accent, focus, selection"
-        note="One accent, three jobs: the armed tool, the selected entity, and a single confirming action. It never fills a slab, never decorates a heading and never appears twice in one glance. Focus is a 2px outline at a 1px offset — an outline, not a glow — and it is identical on every control in the product."
+        note="One accent, three jobs: the armed tool, the selected entity, and a single confirming action. It never fills a slab, never decorates a heading and never appears twice in one glance. A segmented VALUE is none of the three — exactly one member is always pressed, so the current one is raised out of a well-deep track instead of accented, which is what keeps the armed tool and the selection the only amber marks on a screen. Focus is a 2px outline at a 1px offset — an outline, not a glow — and it is identical on every control in the product."
       >
         <div className="flex flex-wrap items-center gap-(--gap-group)">
           <ToolGroup label="Tool states" separated={false}>
@@ -282,6 +283,17 @@ export function DesignSystemPage(): ReactElement {
             <ToolButton disabled>Unavailable</ToolButton>
             <ToolButton tone="destructive">Delete face</ToolButton>
           </ToolGroup>
+          <ToolValueGroup label="Display mode">
+            <ToolButton aria-pressed size="sm" tone="value">
+              Shaded
+            </ToolButton>
+            <ToolButton size="sm" tone="value">
+              Wire
+            </ToolButton>
+            <ToolButton size="sm" tone="value">
+              Hidden
+            </ToolButton>
+          </ToolValueGroup>
           <ToolGroup label="View actions">
             <ToolButton size="sm">Fit</ToolButton>
             <ToolButton size="sm">Front</ToolButton>

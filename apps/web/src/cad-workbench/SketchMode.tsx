@@ -99,6 +99,7 @@ import {
 import {
   ToolButton,
   ToolGroup,
+  ToolValueGroup,
 } from "@slopcad/ui/components/cockpit/tool-button";
 import { ToolStrip } from "@slopcad/ui/components/cockpit/tool-strip";
 import { StatusDot } from "@slopcad/ui/components/cockpit/property-row";
@@ -1566,12 +1567,15 @@ export function SketchMode({
               </ToolButton>
               {/* The axis pair is written out, not mapped: these two
                   `data-testid`s are LITERAL handles in the presentation
-                  surface, and a template would publish them as dynamic. */}
-              <ToolGroup
-                className="gap-0"
-                label="Revolve axis"
-                separated={false}
-              >
+                  surface, and a template would publish them as dynamic.
+                  It is a segmented VALUE — one of the two is always the
+                  revolve axis — so it rides the value track, not the
+                  armed accent. As two bare `aria-pressed` buttons in an
+                  all-icon strip it read as a lit "X" beside a naked "Y":
+                  one amber word with no affordance next to it, and a
+                  third accent in a strip that already carried the armed
+                  tool and the Extrude confirm. */}
+              <ToolValueGroup label="Revolve axis">
                 <ToolButton
                   aria-label="Revolve about X"
                   aria-pressed={revolveAxis === "x"}
@@ -1582,6 +1586,7 @@ export function SketchMode({
                   }}
                   size="sm"
                   title="Revolve about the workplane X axis."
+                  tone="value"
                 >
                   X
                 </ToolButton>
@@ -1595,10 +1600,11 @@ export function SketchMode({
                   }}
                   size="sm"
                   title="Revolve about the workplane Y axis."
+                  tone="value"
                 >
                   Y
                 </ToolButton>
-              </ToolGroup>
+              </ToolValueGroup>
             </>
           )}
           {/* The Phase 38 save action: commits the sketch as a standalone

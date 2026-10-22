@@ -26,6 +26,17 @@
  * idle controls are dim ink on nothing, momentary verbs (the standard
  * views, fit, look-at, reset) carry no pressed state at all.
  *
+ * Trading the fills for the armed treatment removed the slabs but not the
+ * COUNT: display mode, light rig and render quality are all non-null, so
+ * three amber-edged pills still sat in this corner permanently — and with
+ * a body selected, the amber body, the armed tool and the amber Sketch
+ * verb joined them for six accents in one glance. The three are segmented
+ * VALUES, not armed states, so they are `ToolValueGroup` +
+ * `tone="value"`: an inset track with the current member raised out of
+ * it. `aria-pressed` and every `data-testid` are untouched — the armed
+ * accent simply stops being spent on a setting that is never off, and the
+ * idle members stop being bare words in a grid with no affordance.
+ *
  * ## Determinism
  *
  * The view cube is a pure projection of the effective camera
@@ -64,7 +75,11 @@ import {
   RotateCcw,
   ZoomIn,
 } from "lucide-react";
-import { ToolButton } from "@slopcad/ui/components/cockpit/tool-button";
+import {
+  ToolButton,
+  ToolGroup,
+  ToolValueGroup,
+} from "@slopcad/ui/components/cockpit/tool-button";
 import type { ViewportViewSession } from "./viewport-view";
 
 /** Props of {@link CadViewportViewTools}. */
@@ -356,12 +371,15 @@ export function CadViewportViewTools({
       {/* The strip is a floating surface, so it is the system's `overlay`
           rung — the one rung allowed a shadow, and the shadow is the
           scheme-tinted `--elevation-overlay`, not an untinted black drop.
-          Its width comes off `--rail-w-icon` rather than a magic 200px, and
-          its pad and gaps off the panel tokens, so the strip measures like
-          the docks it floats over. */}
+          Its pad and gaps come off the panel tokens, so the strip
+          measures like the docks it floats over. The width is
+          `--hud-corner-w`, the
+          SHARED token the HUD's centre slot keeps clear — this strip is
+          the corner furniture that reservation exists for, and the token
+          is why the two can no longer disagree about it. */}
       <div
         aria-label="View tools"
-        className={`absolute right-3 bottom-3 flex w-[calc(var(--rail-w-icon)*4)] flex-col gap-(--gap) rounded-md border border-rule-strong bg-overlay p-(--pad-row) shadow-overlay ${
+        className={`absolute right-3 bottom-3 flex w-(--hud-corner-w) flex-col gap-(--gap) rounded-md border border-rule-strong bg-overlay p-(--pad-row) shadow-overlay ${
           // While the zoom window is armed its full-viewport layer owns the
           // gesture: the panel stands down (no pointer events, visually
           // receded) so a rectangle drawn over it still commits instead of
@@ -454,10 +472,19 @@ export function CadViewportViewTools({
             ) : null}
           </div>
         ) : null}
-        <div className="grid grid-cols-2 gap-(--gap-tight)">
+        {/* The four named standard views in ONE row, not a 2×2 block:
+            they are momentary camera jumps, they are the shortest labels
+            in the panel, and the second row they used to occupy was 26px
+            of the height that pushed this corner into the teaching
+            card's lane at boot. */}
+        <ToolGroup
+          className="grid grid-cols-4 gap-(--gap-tight)"
+          label="Standard views"
+          separated={false}
+        >
           {STANDARD_VIEWS.map((view) => (
             <ToolButton
-              className="justify-center"
+              className="min-w-0 justify-center px-0"
               data-testid={view.testId}
               key={view.id}
               onClick={() => {
@@ -469,7 +496,7 @@ export function CadViewportViewTools({
               {view.label}
             </ToolButton>
           ))}
-        </div>
+        </ToolGroup>
         {/* The icon verbs keep their natural compact size in one centered
             row — the panel is wide enough that a stretched 2×2 grid would
             read as four empty bars. */}
@@ -522,15 +549,11 @@ export function CadViewportViewTools({
             <Box aria-hidden="true" />
           </ToolButton>
         </div>
-        <div
-          className="grid grid-cols-2 gap-(--gap-tight)"
-          role="group"
-          aria-label="Display mode"
-        >
+        <ToolValueGroup columns={2} label="Display mode">
           {DISPLAY_MODES.map((mode) => (
             <ToolButton
               aria-pressed={session.displayMode === mode.id}
-              className="justify-center"
+              className="justify-center px-0"
               data-testid={`display-mode-${mode.id}`}
               key={mode.id}
               onClick={() => {
@@ -538,20 +561,17 @@ export function CadViewportViewTools({
               }}
               size="sm"
               title={`${mode.label} display`}
+              tone="value"
             >
               {mode.label}
             </ToolButton>
           ))}
-        </div>
-        <div
-          className="grid grid-cols-3 gap-(--gap-tight)"
-          role="group"
-          aria-label="Light rig"
-        >
+        </ToolValueGroup>
+        <ToolValueGroup columns={3} label="Light rig">
           {LIGHT_RIGS.map((rig) => (
             <ToolButton
               aria-pressed={session.lightRig === rig.id}
-              className="justify-center"
+              className="justify-center px-0"
               data-testid={`light-rig-${rig.id}`}
               key={rig.id}
               onClick={() => {
@@ -559,11 +579,12 @@ export function CadViewportViewTools({
               }}
               size="sm"
               title={`${rig.label} light rig`}
+              tone="value"
             >
               {rig.label}
             </ToolButton>
           ))}
-        </div>
+        </ToolValueGroup>
         <div className="flex justify-center gap-(--gap-tight)">
           <ToolButton
             aria-label="Toggle first/third-angle convention"
@@ -599,36 +620,34 @@ export function CadViewportViewTools({
             <RotateCcw aria-hidden="true" />
           </ToolButton>
         </div>
-        <div
-          className="grid grid-cols-2 gap-(--gap-tight)"
-          role="group"
-          aria-label="Render quality"
-        >
+        <ToolValueGroup columns={2} label="Render quality">
           <ToolButton
             aria-pressed={session.renderQuality === "standard"}
-            className="justify-center"
+            className="justify-center px-0"
             data-testid="render-quality-standard"
             onClick={() => {
               onRenderQuality("standard");
             }}
             size="sm"
             title="Standard render (the deterministic boot path)"
+            tone="value"
           >
             Standard
           </ToolButton>
           <ToolButton
             aria-pressed={session.renderQuality === "quality"}
-            className="justify-center"
+            className="justify-center px-0"
             data-testid="render-quality-quality"
             onClick={() => {
               onRenderQuality("quality");
             }}
             size="sm"
             title="Quality render: soft shadows, ambient occlusion (opt-in)"
+            tone="value"
           >
             Quality
           </ToolButton>
-        </div>
+        </ToolValueGroup>
       </div>
     </div>
   );

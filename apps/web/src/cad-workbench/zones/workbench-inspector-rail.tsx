@@ -75,7 +75,7 @@ import {
 } from "@slopcad/ui/components/cockpit/panel";
 import {
   ToolButton,
-  ToolGroup,
+  ToolValueGroup,
 } from "@slopcad/ui/components/cockpit/tool-button";
 import { ToolOptionsPanel } from "@slopcad/ui/components/cockpit/tool-options-bar";
 import type { ToolOptionsDescriptor } from "@slopcad/ui/components/cockpit/tool-options-bar";
@@ -372,14 +372,20 @@ export function WorkbenchInspectorRail({
   // The view switch (D16): both buttons are always in the tab order and
   // `aria-pressed` names the active view. Icon controls since step 3 —
   // the `aria-label`s carry the words the text buttons printed.
+  //
+  // It is a segmented VALUE, so it rides the value track: exactly one of
+  // the two views is live at all times, which made the active one a
+  // permanent amber mark in the rail's header — beside the parameter
+  // panel's amber Apply and the selected configuration's amber row, in a
+  // 240px column. The accent rule has three jobs and "which tab you are
+  // on" is none of them; the track says it without spending the signal.
   const viewSwitch = (
-    <ToolGroup
+    <ToolValueGroup
       className={
         collapsed ? "flex-col items-stretch gap-(--gap-tight)" : undefined
       }
       data-testid="right-sidebar-view-switch"
       label="Right sidebar view"
-      separated={false}
     >
       <ToolButton
         aria-label="Panels"
@@ -391,6 +397,7 @@ export function WorkbenchInspectorRail({
         }}
         size={railButtonSize}
         title="Show the inspector panels."
+        tone="value"
       >
         <PanelsTopLeftIcon aria-hidden="true" />
       </ToolButton>
@@ -404,10 +411,11 @@ export function WorkbenchInspectorRail({
         }}
         size={railButtonSize}
         title="Show the agent chat."
+        tone="value"
       >
         <MessageSquareTextIcon aria-hidden="true" />
       </ToolButton>
-    </ToolGroup>
+    </ToolValueGroup>
   );
 
   return (

@@ -771,12 +771,6 @@
           ]
         },
         {
-          "value": "Display mode",
-          "files": [
-            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
-          ]
-        },
-        {
           "value": "Document",
           "files": [
             "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
@@ -918,12 +912,6 @@
           ]
         },
         {
-          "value": "Light rig",
-          "files": [
-            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
-          ]
-        },
-        {
           "value": "Loading",
           "files": [
             "packages/ui/src/agent/chat/spinner.tsx"
@@ -1032,12 +1020,6 @@
           "value": "Remove file",
           "files": [
             "packages/ui/src/components/formedible/fields/file-upload-field.tsx"
-          ]
-        },
-        {
-          "value": "Render quality",
-          "files": [
-            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
           ]
         },
         {
@@ -6415,6 +6397,12 @@
           "value": "tool-strip-overflow",
           "files": [
             "packages/ui/src/components/cockpit/tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "tool-value-group",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-button.tsx"
           ]
         },
         {
