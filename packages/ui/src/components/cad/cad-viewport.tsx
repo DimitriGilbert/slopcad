@@ -46,6 +46,11 @@
  * `pointer-events-auto`. Pointer events originating inside the overlay
  * layer are excluded from the viewport's empty-space tool dispatch.
  *
+ * `hud` is the STRUCTURED form of the same layer — named corners instead
+ * of one opaque node (see `CadViewportHud`). It renders inside the same
+ * layer, so every pointer and keyboard rule above applies unchanged. The
+ * cockpit passes `hud`; `overlay` stays for the pinned fixtures.
+ *
  * ## Gesture termination
  *
  * While a tool is live, every non-overlay press arms a tracked gesture;
@@ -107,7 +112,9 @@ import {
 } from "@slopcad/cad-r3f";
 import type { SectionClipPlanes } from "@slopcad/cad-r3f";
 import { cn } from "cn";
+import type { CadViewportHudContent } from "./cad-viewport-hud";
 
+import { CadViewportHud } from "./cad-viewport-hud";
 import { useCadStudioPalette } from "./cad-studio-palette";
 
 /** The user-facing strings of {@link CadViewport}. Overridable via props. */
@@ -143,6 +150,14 @@ export interface CadViewportProps {
    * `pointer-events-none` layer (opt elements back in per element).
    */
   readonly overlay?: ReactNode;
+  /**
+   * The HUD's named corners (see `CadViewportHud`): the structured form
+   * of the same layer. It renders INSIDE the overlay layer, so its
+   * pointer discipline and the viewport's overlay-origin gesture rules
+   * are identical to `overlay`'s. Both may be supplied — `overlay` stays
+   * for the pinned fixtures, whose DOM is a baseline.
+   */
+  readonly hud?: CadViewportHudContent;
   /** Label token overrides, merged over {@link CAD_VIEWPORT_LABELS}. */
   readonly labels?: Partial<CadViewportLabels>;
   /** Extends the container classes; sizes the viewport (default 320px tall). */
@@ -284,6 +299,7 @@ export function CadViewport({
   onPick,
   onPickDown,
   onPickUp,
+  hud,
   onSelectionRendered,
   onSettled,
   overlay,
@@ -631,12 +647,13 @@ export function CadViewport({
           {...sceneInteraction}
         />
       )}
-      {overlay !== undefined && overlay !== null ? (
+      {(overlay !== undefined && overlay !== null) || hud !== undefined ? (
         <div
           className="pointer-events-none absolute inset-0"
           ref={overlayLayerRef}
         >
           {overlay}
+          {hud === undefined ? null : <CadViewportHud {...hud} />}
         </div>
       ) : null}
     </div>

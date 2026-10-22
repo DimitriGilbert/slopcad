@@ -525,6 +525,7 @@
             "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
             "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-viewport.tsx",
             "apps/web/src/component-preview/ComponentPreviewPage.tsx",
             "apps/web/src/components/header.tsx",
             "apps/web/src/components/scheme-picker.tsx",
@@ -552,6 +553,7 @@
             "packages/ui/src/components/cad/cad-sketch-canvas.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
             "packages/ui/src/components/cad/cad-toolbar.tsx",
+            "packages/ui/src/components/cad/cad-viewport-hud.tsx",
             "packages/ui/src/components/cockpit/panel.tsx",
             "packages/ui/src/components/cockpit/property-row.tsx",
             "packages/ui/src/components/cockpit/tool-button.tsx",
@@ -833,7 +835,7 @@
           "files": [
             "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx",
             "apps/web/src/cad-workbench/CadWorkbenchPage.tsx",
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-timeline-band.tsx"
           ]
         },
         {
@@ -3618,6 +3620,21 @@
       ]
     },
     {
+      "attribute": "data-hud-slot",
+      "origin": "jsx",
+      "values": [
+        {
+          "value": "projected",
+          "files": [
+            "packages/ui/src/components/cad/cad-viewport-hud.tsx"
+          ]
+        }
+      ],
+      "dynamicFiles": [
+        "packages/ui/src/components/cad/cad-viewport-hud.tsx"
+      ]
+    },
+    {
       "attribute": "data-icon",
       "origin": "jsx",
       "values": [
@@ -5566,6 +5583,12 @@
           ]
         },
         {
+          "value": "cad-viewport-hud",
+          "files": [
+            "packages/ui/src/components/cad/cad-viewport-hud.tsx"
+          ]
+        },
+        {
           "value": "card",
           "files": [
             "packages/ui/src/components/card.tsx"
@@ -6918,7 +6941,7 @@
         {
           "value": "complete-feature-timeline",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-timeline-band.tsx"
           ]
         },
         {
@@ -7850,7 +7873,7 @@
         {
           "value": "viewport-dro",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-viewport.tsx"
           ]
         },
         {
@@ -8304,7 +8327,7 @@
       "origin": "jsx",
       "values": [],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/complete-workbench.tsx"
+        "apps/web/src/cad-workbench/zones/workbench-viewport.tsx"
       ]
     },
     {
@@ -8393,13 +8416,15 @@
         {
           "value": "document",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/complete-workbench.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-viewport.tsx"
           ]
         },
         {
           "value": "import",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/complete-workbench.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-viewport.tsx"
           ]
         }
       ],
@@ -8517,13 +8542,15 @@
           "value": "bottom",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx",
-            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-timeline-band.tsx"
           ]
         },
         {
           "value": "center",
           "files": [
-            "apps/web/src/cad-workbench/SketchMode.tsx"
+            "apps/web/src/cad-workbench/SketchMode.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-viewport.tsx"
           ]
         },
         {
@@ -8609,9 +8636,9 @@
           "files": [
             "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx",
             "apps/web/src/cad-workbench/CadWorkbenchPage.tsx",
-            "apps/web/src/cad-workbench/complete-workbench.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
             "apps/web/src/cad-workbench/zones/workbench-status-band.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-timeline-band.tsx",
             "packages/ui/src/components/cad/cad-model-tree.tsx",
             "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",

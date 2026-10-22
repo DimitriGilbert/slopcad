@@ -125,6 +125,8 @@ import { describeArmedTool } from "./tool-options";
 import { WorkbenchInspectorRail } from "./zones/workbench-inspector-rail";
 import { WorkbenchModelRail } from "./zones/workbench-model-rail";
 import { WorkbenchStatusBand } from "./zones/workbench-status-band";
+import { WorkbenchTimelineBand } from "./zones/workbench-timeline-band";
+import { WorkbenchViewport } from "./zones/workbench-viewport";
 import {
   WorkbenchToolStrip,
   type WorkbenchStripAvailability,
@@ -218,10 +220,6 @@ import {
   waitForRenderedFrame,
 } from "./snapshot-export";
 import { CadViewportViewTools } from "./viewport-view-tools";
-import {
-  FeatureTimelineChips,
-  FeatureTimelineSummary,
-} from "./feature-timeline-strip";
 import { WorkbenchMeasurementSection } from "./measurement-section";
 import { honestSceneFallback } from "./scene-fallback";
 import { sceneOperandOfBody } from "./extrude";
@@ -433,18 +431,6 @@ function sketchHintStoredDismissal(): boolean {
     return false;
   }
 }
-
-/**
- * The DRO's value ink: instrument ink, tabular, in BOTH registers.
- *
- * These digits used to be emissive amber with a glow. They are data, not a
- * signal — and the accent rule (DESIGN.md) reserves the signal colour for
- * the armed tool, the selected entity and one confirming action. With a
- * body selected the old treatment put amber on the extents, the volume,
- * the triangle count AND the tool name at once, which is how a cockpit
- * stops being readable: when everything glows, nothing reads.
- */
-const DRO_VALUE = "text-ink tabular";
 
 /**
  * The complete CAD workbench: all eight plan surfaces composed over the
@@ -1880,42 +1866,13 @@ export function CompleteCadWorkbench({
     !showingPreview && !sketchHintDismissed && (timeline?.length ?? 0) === 0;
 
   const defaultHistoryTimeline = (
-    <div
-      aria-label="Feature timeline"
-      className="flex h-9 min-w-0 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-chrome px-(--pad-panel)"
-      data-testid="complete-feature-timeline"
-      role="group"
-    >
-      <span className="label-section shrink-0 text-ink-faint">Timeline</span>
-      {timeline === null ? (
-        <span className="shrink-0 text-ui text-ink-dim">
-          {regenerationIssue ?? "\u2026"}
-        </span>
-      ) : (
-        <>
-          {/* The document's history gets the FULL frame width: the feature
-              band is its own row below the workspace (the silhouette CAD
-              engineers already trust), so the chain stops competing with
-              the command row for pixels. The chain scrolls HERE alone; the
-              counter sits outside the scrolled content, so a long feature
-              chain can never clip it mid-word (nor can the counter squeeze
-              the chips). Scroll snap keeps every rest position whole-chip,
-              the edges fade, and the container query collapses the chips
-              entirely once the window can no longer host one. */}
-          <div className="h-full min-w-0 flex-1 @container">
-            <div className="no-scrollbar flex h-full w-full snap-x snap-mandatory items-center gap-1 overflow-x-auto @max-[150px]:hidden [mask-image:linear-gradient(to_right,transparent_0,black_10px,black_calc(100%_-_14px),transparent)]">
-              <FeatureTimelineChips
-                entries={timeline}
-                rollback={rollback}
-                onRollback={setRollback}
-                onToggleSuppressed={toggleSuppressed}
-              />
-            </div>
-          </div>
-          <FeatureTimelineSummary entries={timeline} rollback={rollback} />
-        </>
-      )}
-    </div>
+    <WorkbenchTimelineBand
+      entries={timeline}
+      issue={regenerationIssue}
+      onRollback={setRollback}
+      onToggleSuppressed={toggleSuppressed}
+      rollback={rollback}
+    />
   );
 
   const defaultCommandMenu = (
@@ -1948,396 +1905,316 @@ export function CompleteCadWorkbench({
   // clip and view toggles act on — absent when the document carries none.
   const engineSectionRecord = workbenchDocument.sections[0];
 
-  const defaultViewport = (
-    <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
-      data-viewport-showing={showingPreview ? "import" : "document"}
-      id="workbench-complete-viewport"
-    >
-      {/* The canvas owns every pixel the docks leave it: full-bleed, no
-          bezel, no stage — the machine fills its frame. The settle and
-          selection stamps are unchanged. */}
-      <div
-        className="relative min-h-0 flex-1"
-        data-topology-picking={topologyPickDialog ?? undefined}
-        onPointerDown={handleTopologyPickPointer}
-      >
-        <CadViewport
-          cameraControls
-          cameraOrbitDragEnabled={cameraOrbitDragAvailable}
-          clippingPlanes={
-            engine.sectionClipped && !engine.sectionViewMode
-              ? clippingPlanesOf([
-                  {
-                    origin: engineSectionRecord?.origin ?? [0, 0, 0],
-                    normal: engineSectionRecord?.normal ?? [0, 0, 1],
-                    keepSide: engineSectionRecord?.keepSide ?? 1,
-                  },
-                ])
-              : undefined
-          }
-          className={VIEWPORT_CLASS}
-          displayMode={viewSession.displayMode}
-          lightRig={lightRigById(viewSession.lightRig)}
-          renderQuality={viewSession.renderQuality}
-          onUserCamera={handleViewUserCamera}
-          projection={
-            showingPreview
-              ? (ioSurface.preview?.projection ?? null)
-              : applied === null
-                ? null
-                : appearedProjection
-          }
-          userCamera={viewSession.userCamera}
-          onCameraSettled={() => {
-            // The camera-commit frame: a committed overlay state (a series
-            // step, a standard view, a restored spec) reached its first
-            // rendered frame. Count it on the rendered-frames ledger —
-            // COUNT ONLY: the settle-volume surface stays
-            // document-settle-anchored (a camera application is not a
-            // document action). Gesture commits are the only source (a
-            // drag never re-renders per pointer move), so the ledger
-            // advances exactly once per rendered camera state.
-            noteRenderedFrame(null);
-          }}
-          onSettled={() => {
-            if (showingPreview) {
-              // The imported frame stamps the IMPORT surface, never the
-              // document's — an imported mesh is not the parametric model.
-              document
-                .getElementById(rootId)
-                ?.setAttribute(
-                  "data-cad-imported-volume",
-                  ioSurface.preview?.volumeText ?? "",
-                );
-              setImportedFrames((frames) => frames + 1);
-              return;
+  // CENTER's HUD, by named corner (see `CadViewportHud`). Each corner is
+  // host CONTENT; the zone owns where it sits and the pointer discipline.
+
+  // The camera-projected overlays: pure functions of the document and the
+  // projection, never serialized, covering the whole frame.
+  const hudProjected =
+    showingPreview || applied === null ? null : (
+      <>
+        {workbenchDocument.datums.length > 0 ? (
+          <CadDatumOverlay
+            document={workbenchDocument}
+            projection={applied.state.projection}
+          />
+        ) : null}
+        {/* The Phase 47 curve overlay: the document's 3D curve records as
+          camera-projected station polylines over the settled scene — the
+          datum overlay's discipline. */}
+        {workbenchDocument.curves.length > 0 ? (
+          <CadCurveOverlay
+            document={workbenchDocument}
+            projection={applied.state.projection}
+          />
+        ) : null}
+        {/* The Phase 42 hole dialog's preview ghost: the planned hole's
+          footprint over the settled scene, a pure function of the
+          dialog's live values — never a dispatch, never serialized. */}
+        {featureDialog === "hole" && holeDialogValues !== null ? (
+          <CadHolePreviewGhost
+            bounds={applied.state.measurement.bounds}
+            document={workbenchDocument}
+            projection={applied.state.projection}
+            values={holeDialogValues}
+          />
+        ) : null}
+        {/* The topology verbs' NON-MODAL pick surface: the projected
+          anchors over the settled scene (the canvas stays live for orbit
+          and pick; the panel below carries the picks and the form). */}
+        {topologyPickDialog !== null &&
+        topologyPickTargets !== null &&
+        topologyPickCamera !== null ? (
+          <CadTopologyPickOverlay
+            camera={topologyPickCamera}
+            picks={topologyPicks}
+            targets={topologyPickTargets}
+            verb={topologyPickDialog}
+          />
+        ) : null}
+        {topologyPickDialog !== null ? (
+          <CadTopologyPickPanel
+            datumPlanes={datumPlaneOptions}
+            error={
+              featureOutcome !== null && !featureOutcome.ok
+                ? `${featureOutcome.code}: ${featureOutcome.message}`
+                : null
             }
-            // Settle protocol: pixels may be compared only once this stamp
-            // agrees with the settled volume, written synchronously. The
-            // settle lamp reads the same agreement: this frame rendered
-            // THIS document.
-            noteRenderedFrame(documentVolumeText);
-            setSettledDocument(engine.documentApi.document);
-          }}
-          onSelectionRendered={(key) => {
-            document
-              .getElementById(rootId)
-              ?.setAttribute("data-cad-selection-frame", key);
-          }}
-          overlay={
-            <>
-              {/* The registration brackets: the stage's corners are framed
-                  like a drawing sheet around the workpiece — the same
-                  "captured region" language as the DRO band below it. */}
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0"
-              >
-                <span className="absolute top-1.5 left-1.5 size-2.5 border-t border-l border-viewport-rule-strong" />
-                <span className="absolute top-1.5 right-1.5 size-2.5 border-t border-r border-viewport-rule-strong" />
-                <span className="absolute bottom-1.5 left-1.5 size-2.5 border-b border-l border-viewport-rule-strong" />
-                <span className="absolute right-1.5 bottom-1.5 size-2.5 border-r border-b border-viewport-rule-strong" />
-              </div>
-              {showingPreview ? (
-                <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-(--gap) rounded-sm border border-viewport-rule bg-viewport-scrim px-2 py-1">
-                  <span className="font-mono text-data text-viewport-ink-dim">
-                    {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
-                  </span>
-                  <ToolButton
-                    className="text-viewport-ink-dim hover:bg-viewport-rule hover:text-viewport-ink"
-                    data-testid="complete-clear-import"
-                    onClick={ioSurface.onClearPreview}
-                    size="sm"
-                  >
-                    Back to model
-                  </ToolButton>
-                </div>
-              ) : null}
-              {!showingPreview &&
-              applied !== null &&
-              workbenchDocument.datums.length > 0 ? (
-                <CadDatumOverlay
-                  document={workbenchDocument}
-                  projection={applied.state.projection}
-                />
-              ) : null}
-              {/* The Phase 47 curve overlay: the document's 3D curve
-                  records as camera-projected station polylines over the
-                  settled scene — the datum overlay's discipline (a pure
-                  function of document and projection, never serialized). */}
-              {!showingPreview &&
-              applied !== null &&
-              workbenchDocument.curves.length > 0 ? (
-                <CadCurveOverlay
-                  document={workbenchDocument}
-                  projection={applied.state.projection}
-                />
-              ) : null}
-              {/* The Phase 42 hole dialog's preview ghost: the planned
-                  hole's footprint over the settled scene, a pure function
-                  of the dialog's live values — never a dispatch, never
-                  serialized (the datum overlay's discipline). */}
-              {!showingPreview &&
-              applied !== null &&
-              featureDialog === "hole" &&
-              holeDialogValues !== null ? (
-                <CadHolePreviewGhost
-                  bounds={applied.state.measurement.bounds}
-                  document={workbenchDocument}
-                  projection={applied.state.projection}
-                  values={holeDialogValues}
-                />
-              ) : null}
-              {/* The topology verbs' NON-MODAL pick surface: the
-                  projected anchors over the settled scene and the
-                  floating panel carrying the picks and the verb's form —
-                  the canvas stays live for orbit and pick. */}
-              {!showingPreview &&
-              topologyPickDialog !== null &&
-              topologyPickTargets !== null &&
-              topologyPickCamera !== null ? (
-                <CadTopologyPickOverlay
-                  camera={topologyPickCamera}
-                  picks={topologyPicks}
-                  targets={topologyPickTargets}
-                  verb={topologyPickDialog}
-                />
-              ) : null}
-              {!showingPreview && topologyPickDialog !== null ? (
-                <CadTopologyPickPanel
-                  datumPlanes={datumPlaneOptions}
-                  error={
-                    featureOutcome !== null && !featureOutcome.ok
-                      ? `${featureOutcome.code}: ${featureOutcome.message}`
-                      : null
-                  }
-                  key={topologyPickDialog}
-                  onCancel={() => {
-                    setFeatureDialog(null);
-                    setFeatureOutcome(null);
-                  }}
-                  onFaceOp={submitFaceOp}
-                  onTopologyCut={submitTopologyCut}
-                  queryError={topologyPickQueryError}
-                  selection={topologyPickSelection}
-                  targets={topologyPickTargets}
-                  verb={topologyPickDialog}
-                />
-              ) : null}
-              {sketchOnFaceNote !== null ? (
-                <div
-                  className="absolute top-2 right-2 max-w-sm rounded-sm border border-destructive/40 bg-overlay px-2 py-1 text-ui text-destructive shadow-overlay"
-                  data-testid="sketch-on-face-note"
-                  role="alert"
-                >
-                  {sketchOnFaceNote}
-                </div>
-              ) : null}
-              {/* The Phase 45 navigation/display strip: view cube,
-                  standard views, projection toggle, display modes, fit,
-                  zoom window, look-at, reset — every command writing the
-                  session overlay (never the document). */}
-              <CadViewportViewTools
-                bounds={
-                  showingPreview || applied === null
-                    ? null
-                    : applied.state.measurement.bounds
-                }
-                currentCamera={
-                  viewSession.userCamera ??
-                  (showingPreview
-                    ? (ioSurface.preview?.projection.camera ?? null)
-                    : applied === null
-                      ? null
-                      : applied.state.projection.camera)
-                }
-                onConvention={handleViewConvention}
-                onDisplayMode={handleViewDisplayMode}
-                onLightRig={handleViewLightRig}
-                onRenderQuality={handleViewRenderQuality}
-                onUserCamera={handleViewUserCamera}
-                projection={
-                  showingPreview
-                    ? (ioSurface.preview?.projection ?? null)
-                    : applied === null
-                      ? null
-                      : appearedProjection
-                }
-                selection={selectionApi.selected}
-                session={viewSession}
-              />
-              {sketchHintOpen ? (
-                <div
-                  className="pointer-events-auto absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1rem)] -translate-x-1/2"
-                  data-testid="workbench-sketch-hint"
-                >
-                  {/* The card is a floating surface, so it is the `overlay`
-                      rung with the scheme-tinted overlay shadow — not an
-                      amber-edged translucent plate with a black drop. It
-                      used to be bordered, washed, icon-tinted AND
-                      word-tinted in the signal colour: four accents on one
-                      transient card, while the armed tool had to make do
-                      with the same hue. The one signal mark it keeps is the
-                      verb it is teaching. */}
-                  <div className="flex items-start gap-(--gap-group) rounded-md border border-rule-strong bg-overlay px-3 py-2 shadow-overlay">
-                    <span
-                      aria-hidden="true"
-                      className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border border-rule bg-well text-ink-dim"
-                    >
-                      <PencilLine className="size-3.5" />
-                    </span>
-                    {/* The prose column is BOUNDED: left to `w-max` the
-                        card grew to the stage's full width and pushed its
-                        own verbs under the view strip at 1280. A teaching
-                        card is a paragraph, not a banner. */}
-                    <div className="min-w-0 max-w-[22rem]">
-                      <p className="text-ui text-ink">
-                        Start a sketch to build geometry — draw a profile, then{" "}
-                        <span className="font-medium text-signal">Extrude</span>
-                        .
-                      </p>
-                      <p className="mt-0.5 text-label text-ink-dim">
-                        The guide plate is your starter document. Or press{" "}
-                        <KeyCap>Ctrl+K</KeyCap> and run “Sketch workspace” — or
-                        skip the sketch with a primitive (“Add a box”, sphere,
-                        cylinder, cone).
-                      </p>
-                    </div>
-                    <ToolGroup
-                      className="shrink-0"
-                      label="Getting started"
-                      separated={false}
-                    >
-                      <ToolButton
-                        data-testid="workbench-sketch-hint-start"
-                        onClick={() => {
-                          setMode("sketch");
-                        }}
-                        size="sm"
-                      >
-                        Start a sketch
-                      </ToolButton>
-                      <ToolButton
-                        data-testid="workbench-sketch-hint-primitive"
-                        onClick={() => {
-                          openFeatureDialog("box");
-                        }}
-                        size="sm"
-                      >
-                        Add a box
-                      </ToolButton>
-                      <ToolButton
-                        aria-label="Dismiss the getting-started hint"
-                        className="w-(--control-h) justify-center px-0"
-                        data-testid="workbench-sketch-hint-dismiss"
-                        onClick={dismissSketchHint}
-                        size="sm"
-                        title="Dismiss"
-                      >
-                        <X />
-                      </ToolButton>
-                    </ToolGroup>
-                  </div>
-                </div>
-              ) : null}
-            </>
-          }
-        />
-      </div>
-      {/* The DRO band: the viewport region's readout, edge to edge along
-          its bottom — the same honest engine numbers the machine surfaces
-          carry (scene kind, extents, volume, triangles), plus the settle
-          lamp and the live tool state. Never a second source of truth. In
-          the dark register the band reads as an emissive instrument: amber
-          digits over near-black glass (the cockpit's glance-mark); light
-          stays plain ink on paper. */}
-      <div
-        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-well px-(--pad-panel) font-mono text-data whitespace-nowrap text-ink-dim"
-        data-testid="viewport-dro"
+            key={topologyPickDialog}
+            onCancel={() => {
+              setFeatureDialog(null);
+              setFeatureOutcome(null);
+            }}
+            onFaceOp={submitFaceOp}
+            onTopologyCut={submitTopologyCut}
+            queryError={topologyPickQueryError}
+            selection={topologyPickSelection}
+            targets={topologyPickTargets}
+            verb={topologyPickDialog}
+          />
+        ) : null}
+      </>
+    );
+
+  // TOP LEFT: what the stage is showing. The import preview is the one
+  // state where the stage is not the document.
+  const hudTopLeft = !showingPreview ? null : (
+    <div className="pointer-events-auto flex items-center gap-(--gap) rounded-sm border border-viewport-rule bg-viewport-scrim px-2 py-1">
+      <span className="font-mono text-data text-viewport-ink-dim">
+        {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
+      </span>
+      <ToolButton
+        className="text-viewport-ink-dim hover:bg-viewport-rule hover:text-viewport-ink"
+        data-testid="complete-clear-import"
+        onClick={ioSurface.onClearPreview}
+        size="sm"
       >
+        Back to model
+      </ToolButton>
+    </div>
+  );
+
+  // TOP RIGHT: what the last action has to say about itself.
+  const hudTopRight =
+    sketchOnFaceNote === null ? null : (
+      <div
+        className="rounded-sm border border-destructive/40 bg-overlay px-2 py-1 text-ui text-destructive shadow-overlay"
+        data-testid="sketch-on-face-note"
+        role="alert"
+      >
+        {sketchOnFaceNote}
+      </div>
+    );
+
+  // The HUD's self-positioning LAYER: the Phase 45 navigation/display
+  // strip — view cube, standard views, projection toggle, display modes,
+  // fit, zoom window, look-at, reset. Every command writes the session
+  // overlay, never the document. It pins its own panel bottom-right and
+  // owns a full-frame drag surface for the zoom window, so it takes the
+  // HUD's layer slot rather than a corner box (see `CadViewportHud`).
+  const hudViewTools = (
+    <CadViewportViewTools
+      bounds={
+        showingPreview || applied === null
+          ? null
+          : applied.state.measurement.bounds
+      }
+      currentCamera={
+        viewSession.userCamera ??
+        (showingPreview
+          ? (ioSurface.preview?.projection.camera ?? null)
+          : applied === null
+            ? null
+            : applied.state.projection.camera)
+      }
+      onConvention={handleViewConvention}
+      onDisplayMode={handleViewDisplayMode}
+      onLightRig={handleViewLightRig}
+      onRenderQuality={handleViewRenderQuality}
+      onUserCamera={handleViewUserCamera}
+      projection={
+        showingPreview
+          ? (ioSurface.preview?.projection ?? null)
+          : applied === null
+            ? null
+            : appearedProjection
+      }
+      selection={selectionApi.selected}
+      session={viewSession}
+    />
+  );
+
+  // BOTTOM CENTER: the one transient teaching card.
+  const hudBottomCenter = !sketchHintOpen ? null : (
+    <div className="pointer-events-auto" data-testid="workbench-sketch-hint">
+      {/* The card is a floating surface, so it is the `overlay` rung with
+          the scheme-tinted overlay shadow — not an amber-edged
+          translucent plate with a black drop. It used to be bordered,
+          washed, icon-tinted AND word-tinted in the signal colour: four
+          accents on one transient card, while the armed tool had to make
+          do with the same hue. The one signal mark it keeps is the verb
+          it is teaching. */}
+      <div className="flex items-start gap-(--gap-group) rounded-md border border-rule-strong bg-overlay px-3 py-2 shadow-overlay">
         <span
           aria-hidden="true"
-          className={`size-1.5 shrink-0 rounded-full ${
-            showingPreview || applied === null
-              ? "bg-signal motion-safe:animate-pulse"
-              : "bg-status-ok"
-          }`}
-        />
-        {/* The static facts: the band's shrinkable half. */}
-        <div className="flex min-w-0 items-center gap-(--gap-group) overflow-hidden">
-          {showingPreview ? (
-            <>
-              <span className="text-ink tabular">
-                import · {ioSurface.preview?.source ?? ""}
-              </span>
-              <span>
-                tris{" "}
-                <span className={DRO_VALUE}>
-                  {ioSurface.preview === null
-                    ? "…"
-                    : String(ioSurface.preview.triangles)}
-                </span>
-              </span>
-              <span>
-                vol{" "}
-                <span className={DRO_VALUE}>
-                  {ioSurface.preview === null
-                    ? "…"
-                    : `${ioSurface.preview.volumeText} mm³`}
-                </span>
-              </span>
-              <span>geometry only, not in the document</span>
-            </>
-          ) : applied === null ? (
-            <span className="text-ink tabular">computing…</span>
-          ) : (
-            <>
-              <span className="text-ink tabular">{engine.activeScene}</span>
-              <span>
-                extents{" "}
-                <span className={DRO_VALUE}>
-                  {formatBoundsExtents(applied.state.measurement.bounds)}
-                </span>
-              </span>
-              <span>
-                vol{" "}
-                <span className={DRO_VALUE}>
-                  {`${applied.state.measurement.volume.toFixed(3)} mm³`}
-                </span>
-              </span>
-              <span>
-                tris{" "}
-                <span className={DRO_VALUE}>
-                  {String(applied.state.measurement.triangles)}
-                </span>
-              </span>
-            </>
-          )}
-        </div>
-        {/* The live tool state rides the DRO's right end: what is armed,
-            and how it cancels. It used to be `hidden … sm:flex` — the
-            most VOLATILE fact in the band, deleted by viewport width.
-            It is `shrink-0` now instead: the band's static facts (scene,
-            extents, volume, triangles) give up their width first, and
-            what is armed is always on screen. */}
-        <span className="ml-auto flex shrink-0 items-center gap-(--gap-group)">
-          {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
-            <span>
-              tool{" "}
-              <span className="text-ink tabular">{toolsApi.activeToolId}</span>{" "}
-              · Esc cancels
-            </span>
-          ) : null}
-          <span>
-            sel{" "}
-            <span className={DRO_VALUE}>
-              {String(selectionApi.selected.length)}
-            </span>
-          </span>
+          className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border border-rule bg-well text-ink-dim"
+        >
+          <PencilLine className="size-3.5" />
         </span>
+        {/* The prose column is BOUNDED: left to `w-max` the card grew to
+            the stage's full width and pushed its own verbs under the view
+            strip at 1280. A teaching card is a paragraph, not a banner. */}
+        <div className="min-w-0 max-w-[22rem]">
+          <p className="text-ui text-ink">
+            Start a sketch to build geometry — draw a profile, then{" "}
+            <span className="font-medium text-signal">Extrude</span>.
+          </p>
+          <p className="mt-0.5 text-label text-ink-dim">
+            The guide plate is your starter document. Or press{" "}
+            <KeyCap>Ctrl+K</KeyCap> and run “Sketch workspace” — or skip the
+            sketch with a primitive (“Add a box”, sphere, cylinder, cone).
+          </p>
+        </div>
+        <ToolGroup
+          className="shrink-0"
+          label="Getting started"
+          separated={false}
+        >
+          <ToolButton
+            data-testid="workbench-sketch-hint-start"
+            onClick={() => {
+              setMode("sketch");
+            }}
+            size="sm"
+          >
+            Start a sketch
+          </ToolButton>
+          <ToolButton
+            data-testid="workbench-sketch-hint-primitive"
+            onClick={() => {
+              openFeatureDialog("box");
+            }}
+            size="sm"
+          >
+            Add a box
+          </ToolButton>
+          <ToolButton
+            aria-label="Dismiss the getting-started hint"
+            className="w-(--control-h) justify-center px-0"
+            data-testid="workbench-sketch-hint-dismiss"
+            onClick={dismissSketchHint}
+            size="sm"
+            title="Dismiss"
+          >
+            <X />
+          </ToolButton>
+        </ToolGroup>
       </div>
     </div>
+  );
+
+  const defaultViewport = (
+    <WorkbenchViewport
+      dro={{
+        armedToolId: toolsApi.phase === "active" ? toolsApi.activeToolId : null,
+        document:
+          applied === null
+            ? null
+            : {
+                extentsText: formatBoundsExtents(
+                  applied.state.measurement.bounds,
+                ),
+                sceneKind: engine.activeScene,
+                triangles: String(applied.state.measurement.triangles),
+                volumeText: applied.state.measurement.volume.toFixed(3),
+              },
+        preview:
+          ioSurface.preview === null
+            ? null
+            : {
+                source: ioSurface.preview.source,
+                triangles: String(ioSurface.preview.triangles),
+                volumeText: ioSurface.preview.volumeText,
+              },
+        selectionCount: selectionApi.selected.length,
+        settled: !showingPreview && applied !== null,
+        showingPreview,
+      }}
+      onFramePointerDown={handleTopologyPickPointer}
+      topologyPickingVerb={topologyPickDialog ?? undefined}
+    >
+      <CadViewport
+        cameraControls
+        cameraOrbitDragEnabled={cameraOrbitDragAvailable}
+        clippingPlanes={
+          engine.sectionClipped && !engine.sectionViewMode
+            ? clippingPlanesOf([
+                {
+                  origin: engineSectionRecord?.origin ?? [0, 0, 0],
+                  normal: engineSectionRecord?.normal ?? [0, 0, 1],
+                  keepSide: engineSectionRecord?.keepSide ?? 1,
+                },
+              ])
+            : undefined
+        }
+        className={VIEWPORT_CLASS}
+        displayMode={viewSession.displayMode}
+        hud={{
+          bottomCenter: hudBottomCenter,
+          layer: hudViewTools,
+          projected: hudProjected,
+          topLeft: hudTopLeft,
+          topRight: hudTopRight,
+        }}
+        lightRig={lightRigById(viewSession.lightRig)}
+        renderQuality={viewSession.renderQuality}
+        onUserCamera={handleViewUserCamera}
+        projection={
+          showingPreview
+            ? (ioSurface.preview?.projection ?? null)
+            : applied === null
+              ? null
+              : appearedProjection
+        }
+        userCamera={viewSession.userCamera}
+        onCameraSettled={() => {
+          // The camera-commit frame: a committed overlay state (a series
+          // step, a standard view, a restored spec) reached its first
+          // rendered frame. Count it on the rendered-frames ledger —
+          // COUNT ONLY: the settle-volume surface stays
+          // document-settle-anchored (a camera application is not a
+          // document action). Gesture commits are the only source (a drag
+          // never re-renders per pointer move), so the ledger advances
+          // exactly once per rendered camera state.
+          noteRenderedFrame(null);
+        }}
+        onSettled={() => {
+          if (showingPreview) {
+            // The imported frame stamps the IMPORT surface, never the
+            // document's — an imported mesh is not the parametric model.
+            document
+              .getElementById(rootId)
+              ?.setAttribute(
+                "data-cad-imported-volume",
+                ioSurface.preview?.volumeText ?? "",
+              );
+            setImportedFrames((frames) => frames + 1);
+            return;
+          }
+          // Settle protocol: pixels may be compared only once this stamp
+          // agrees with the settled volume, written synchronously. The
+          // settle lamp reads the same agreement: this frame rendered THIS
+          // document.
+          noteRenderedFrame(documentVolumeText);
+          setSettledDocument(engine.documentApi.document);
+        }}
+        onSelectionRendered={(key) => {
+          document
+            .getElementById(rootId)
+            ?.setAttribute("data-cad-selection-frame", key);
+        }}
+      />
+    </WorkbenchViewport>
   );
 
   // The rails' default content (see ./zones/rail-slot-defaults): the slot
