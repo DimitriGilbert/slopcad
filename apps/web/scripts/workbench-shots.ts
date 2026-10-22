@@ -17,6 +17,13 @@
  *   collapsed both rails collapsed to `--rail-w-icon` — the icon-rail
  *             state, which is the layout at every width below 1280 and
  *             one toggle away above it
+ *   sketch    the SKETCH workspace, reached the product's own way (the
+ *             getting-started card's "Start a sketch") — the editor's
+ *             tool strip, its canvas, its inspector and its status band
+ *   sketch-family the dimension FAMILY open over that strip: the six
+ *             dimension verbs that used to be six words in a wrapping
+ *             row. Skipped where the family does not exist (a baseline
+ *             capture of an older tree), never faked
  *
  * `modeled` is also shot at the 768 drawer band, the width the floor
  * contract pins.
@@ -155,6 +162,40 @@ async function walk(
     }
   }
 
+  // The sketch workspace, entered the way the product teaches it: the
+  // getting-started card's own verb. It gets its OWN context (see main):
+  // that card retires the moment the document carries a feature, so it
+  // cannot share a walk with the modelling states.
+  if (states.includes("sketch") || states.includes("sketch-family")) {
+    await page.getByTestId("workbench-sketch-hint-start").click();
+    await page.waitForFunction(
+      (rootId) =>
+        document.getElementById(rootId)?.getAttribute("data-sketch-mode") ===
+        "sketch",
+      ROOT_ID,
+      { timeout: 30_000 },
+    );
+    await page.locator("#sketch-root").waitFor({ timeout: 30_000 });
+    if (states.includes("sketch")) {
+      await shoot(page, `workbench-sketch-${suffix}`, taken);
+    }
+    if (states.includes("sketch-family")) {
+      // The dimension family's chevron — absent in a pre-step-4 tree,
+      // where the six dimension verbs are six separate word buttons.
+      const family = page.getByTestId("sketch-family-dimension");
+      if ((await family.count()) > 0) {
+        await family.click();
+        await page.waitForTimeout(200);
+        await page.screenshot({
+          path: `${outDir}/workbench-sketch-family-${suffix}.png`,
+        });
+        taken.push(`workbench-sketch-family-${suffix}`);
+        console.log(`captured workbench-sketch-family-${suffix}`);
+        await page.keyboard.press("Escape");
+      }
+    }
+  }
+
   await context.close();
 }
 
@@ -172,6 +213,17 @@ async function main(): Promise<void> {
         register,
         1280,
         ["boot", "palette", "dialog", "modeled", "selected", "collapsed"],
+        taken,
+      );
+      // Its own context: the getting-started card is the product's own
+      // way into a sketch, and it retires the moment the document carries
+      // a feature — so the sketch states cannot ride the modelling walk.
+      await walk(
+        browser,
+        scheme,
+        register,
+        1280,
+        ["sketch", "sketch-family"],
         taken,
       );
       await walk(browser, scheme, register, 768, ["modeled"], taken);

@@ -512,6 +512,7 @@
         {
           "value": "true",
           "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/analysis-workbench.tsx",
             "apps/web/src/cad-workbench/complete-workbench.tsx",
             "apps/web/src/cad-workbench/curve-overlay.tsx",
@@ -549,7 +550,6 @@
             "packages/ui/src/components/cad/cad-parameter-manager.tsx",
             "packages/ui/src/components/cad/cad-parameter-panel.tsx",
             "packages/ui/src/components/cad/cad-sketch-canvas.tsx",
-            "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
             "packages/ui/src/components/cad/cad-toolbar.tsx",
             "packages/ui/src/components/cockpit/panel.tsx",
@@ -1016,6 +1016,7 @@
         {
           "value": "Redo",
           "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
@@ -1074,7 +1075,13 @@
           ]
         },
         {
-          "value": "Revolve axis",
+          "value": "Revolve about X",
+          "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx"
+          ]
+        },
+        {
+          "value": "Revolve about Y",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx"
           ]
@@ -1107,12 +1114,6 @@
           "value": "Show password",
           "files": [
             "packages/ui/src/components/formedible/fields/password-field.tsx"
-          ]
-        },
-        {
-          "value": "Sketch history",
-          "files": [
-            "apps/web/src/cad-workbench/SketchMode.tsx"
           ]
         },
         {
@@ -1196,6 +1197,7 @@
         {
           "value": "Undo",
           "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
@@ -1237,6 +1239,7 @@
         }
       ],
       "dynamicFiles": [
+        "apps/web/src/cad-workbench/SketchMode.tsx",
         "apps/web/src/cad-workbench/drawing-workbench.tsx",
         "apps/web/src/cad-workbench/feature-forms.tsx",
         "apps/web/src/cad-workbench/feature-timeline-strip.tsx",
@@ -3624,7 +3627,6 @@
             "apps/web/src/cad-projects/ProjectWorkbenchPage.tsx",
             "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx",
             "apps/web/src/cad-workbench/CadWorkbenchPage.tsx",
-            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/share-viewer-bar.tsx",
             "apps/web/src/viewer/ViewerSurface.tsx"
           ]
@@ -4186,6 +4188,12 @@
       "origin": "jsx",
       "values": [
         {
+          "value": "",
+          "files": [
+            "packages/ui/src/components/cad/cad-sketch-inspector.tsx"
+          ]
+        },
+        {
           "value": "false",
           "files": [
             "packages/ui/src/components/cad/cad-model-tree.tsx"
@@ -4200,6 +4208,7 @@
         }
       ],
       "dynamicFiles": [
+        "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
         "packages/ui/src/components/cockpit/property-row.tsx"
       ]
     },
@@ -8117,6 +8126,7 @@
         "packages/ui/src/components/cad/cad-io-dialog.tsx",
         "packages/ui/src/components/cad/cad-model-tree.tsx",
         "packages/ui/src/components/cad/cad-property-panel.tsx",
+        "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
         "packages/ui/src/components/cockpit/tool-flyout.tsx"
       ]
     },
@@ -8506,7 +8516,14 @@
         {
           "value": "bottom",
           "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
+          ]
+        },
+        {
+          "value": "center",
+          "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx"
           ]
         },
         {
@@ -8518,12 +8535,14 @@
         {
           "value": "right",
           "files": [
-            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
+            "packages/ui/src/components/cad/cad-sketch-inspector.tsx"
           ]
         },
         {
           "value": "top",
           "files": [
+            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         }
@@ -8590,11 +8609,11 @@
           "files": [
             "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx",
             "apps/web/src/cad-workbench/CadWorkbenchPage.tsx",
-            "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/complete-workbench.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
             "apps/web/src/cad-workbench/zones/workbench-status-band.tsx",
             "packages/ui/src/components/cad/cad-model-tree.tsx",
+            "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
             "packages/ui/src/components/cad/cad-viewport.tsx",
             "packages/ui/src/components/cockpit/tool-button.tsx",

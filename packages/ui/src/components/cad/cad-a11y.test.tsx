@@ -274,6 +274,9 @@ describe("CadSketchInspector focus visibility", () => {
       />,
     );
     const button = document.querySelector('[data-sketch-constraint-id="c1"]');
-    expect(button?.className).toContain("focus-visible:ring-1");
+    // The ring became the system's ONE focus appearance: a 2px outline at
+    // a 1px offset, via `focus-instrument` (DESIGN.md — an outline, not a
+    // glow, identical on every control).
+    expect(button?.className).toContain("focus-instrument");
   });
 });

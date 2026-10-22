@@ -44,19 +44,29 @@ export interface WorkbenchStatusBandProps {
   readonly featureCount: number | null;
   /** The `statusBar` slot's node (see the chrome/content contract above). */
   readonly statusBar: ReactNode;
+  /**
+   * Hidden (never unmounted) while another mode owns the frame's bottom
+   * edge. The zone law gives each mode the same five zones with different
+   * CONTENTS, and sketch mode's status content is the sketch's own band —
+   * two stacked status edges would be two sources of one truth. The
+   * model's band stays MOUNTED so every machine handle it publishes (the
+   * settle lamp, the status bar's own surface) keeps answering.
+   */
+  readonly hidden?: boolean;
 }
 
 /** The status band: the settle lamp, the document plate, the status bar. */
 export function WorkbenchStatusBand({
   extentsText,
   featureCount,
+  hidden = false,
   sceneKind,
   settled,
   statusBar,
 }: WorkbenchStatusBandProps): ReactElement {
   return (
     <div
-      className="flex shrink-0 items-center gap-(--gap-group) border-t border-rule bg-panel pl-(--pad-panel)"
+      className={`${hidden ? "hidden" : "flex"} shrink-0 items-center gap-(--gap-group) border-t border-rule bg-panel pl-(--pad-panel)`}
       data-slot="workbench-status-band"
       data-zone="bottom"
     >

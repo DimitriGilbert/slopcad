@@ -94,6 +94,15 @@ export interface ToolFlyoutProps {
   /** The chevron's `data-testid`. */
   readonly triggerTestId?: string;
   /**
+   * An EXTRA data attribute name every member carries its own id in — on
+   * the face and on each menu item alike (`data-tool-id` is always there
+   * too). It exists for surfaces whose machine handle predates the family
+   * mechanism: the sketch strip's tools are addressed by
+   * `data-sketch-tool-id`, and folding six dimension verbs into a flyout
+   * must not cost them that handle.
+   */
+  readonly itemAttribute?: string;
+  /**
    * Extends the FACE's classes. The one sanctioned use is marking a
    * family as the surface's single confirming action (the signal edge on
    * the sketch family); it is not a styling hook for appearance.
@@ -136,6 +145,7 @@ export function ToolFlyout({
   defaultFacedId,
   faceClassName,
   facedId,
+  itemAttribute,
   items,
   label,
   onFacedIdChange,
@@ -195,6 +205,10 @@ export function ToolFlyout({
   if (face === undefined) return null;
   const FaceIcon = face.icon;
 
+  /** The host's extra id attribute for one member, or nothing. */
+  const idAttribute = (itemId: string): Readonly<Record<string, string>> =>
+    itemAttribute === undefined ? {} : { [itemAttribute]: itemId };
+
   return (
     <div
       className={cn("flex shrink-0 items-center", className)}
@@ -216,6 +230,7 @@ export function ToolFlyout({
         }}
         size="icon"
         title={face.description}
+        {...idAttribute(face.id)}
       >
         <FaceIcon />
         {/* The family tick: this face stands for more than itself. */}
@@ -282,6 +297,7 @@ export function ToolFlyout({
                   role="menuitem"
                   title={item.description}
                   type="button"
+                  {...idAttribute(item.id)}
                 >
                   <ItemIcon />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>

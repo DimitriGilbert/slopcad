@@ -22,6 +22,7 @@
     "./agent/providers": "./src/agent/providers/index.ts",
     "./agent/chat/agent-chat-panel": "./src/agent/chat/agent-chat-panel.tsx",
     "./components/cad/cad-form-density": "./src/components/cad/cad-form-density.ts",
+    "./components/cad/cad-tool-icons": "./src/components/cad/cad-tool-icons.ts",
     "./components/*": {
       "default": [
         "./src/components/*.tsx",

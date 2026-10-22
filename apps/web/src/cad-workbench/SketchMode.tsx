@@ -38,7 +38,7 @@
  * sketch-on-face regression pin) — everything the Playwright battery asserts.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import {
   angle,
@@ -91,8 +91,17 @@ import {
 import type { ProfileExtrudeInput } from "@slopcad/cad-kernel";
 import { importDxf } from "@slopcad/cad-io/dxf-import";
 import { importSvg } from "@slopcad/cad-io/svg-import";
-import { Redo2, Undo2 } from "lucide-react";
-import { Button } from "@slopcad/ui/components/button";
+import {
+  CAD_MODEL_COMMAND_ICONS,
+  CAD_SKETCH_COMMAND_ICONS,
+  cadSketchToolFamilyOf,
+} from "@slopcad/ui/components/cad/cad-tool-icons";
+import {
+  ToolButton,
+  ToolGroup,
+} from "@slopcad/ui/components/cockpit/tool-button";
+import { ToolStrip } from "@slopcad/ui/components/cockpit/tool-strip";
+import { StatusDot } from "@slopcad/ui/components/cockpit/property-row";
 import {
   expressionNumberTokenName,
   expressionNumberTokenNegated,
@@ -113,6 +122,7 @@ import { CadSketchToolbar } from "@slopcad/ui/components/cad/cad-sketch-toolbar"
 import type { FeatureFormOutcome } from "./workbench-engine";
 
 import { kernelSegment } from "./extrude";
+import { sketchCanvasSize, type SketchCanvasBox } from "./sketch-canvas-frame";
 import {
   constraintLabel,
   constraintOperandIds,
@@ -165,10 +175,29 @@ interface SketchSolveState {
 
 const SOLVER = createReferenceSketchSolver();
 
+/**
+ * The strip's clusters: select · draw · modify · constrain · dimension.
+ *
+ * The clusters are a REGROUPING of the same three domain lists, in the
+ * same FLAT order — the positional shortcut row (digits then `q`…`p`) is
+ * counted over this flat order, so splitting `select` out of the drawing
+ * list and the dimension kinds off the constraint list changes not one
+ * key assignment. The dimension split is derived from the family data
+ * rather than an index, so adding a dimension kind re-clusters itself.
+ */
+const DIMENSION_TOOL_IDS = SKETCH_CONSTRAINT_TOOLS.filter(
+  (toolId) => cadSketchToolFamilyOf(toolId)?.id === "dimension",
+);
+const CONSTRAINT_TOOL_IDS = SKETCH_CONSTRAINT_TOOLS.filter(
+  (toolId) => cadSketchToolFamilyOf(toolId)?.id !== "dimension",
+);
+
 const TOOLBAR_GROUPS = [
-  { id: "tools", label: "Tools", toolIds: SKETCH_DRAWING_TOOLS },
-  { id: "edit", label: "Edit", toolIds: SKETCH_EDIT_TOOLS },
-  { id: "constraints", label: "Constraints", toolIds: SKETCH_CONSTRAINT_TOOLS },
+  { id: "select", label: "Select", toolIds: SKETCH_DRAWING_TOOLS.slice(0, 1) },
+  { id: "draw", label: "Draw", toolIds: SKETCH_DRAWING_TOOLS.slice(1) },
+  { id: "modify", label: "Modify", toolIds: SKETCH_EDIT_TOOLS },
+  { id: "constrain", label: "Constrain", toolIds: CONSTRAINT_TOOL_IDS },
+  { id: "dimension", label: "Dimension", toolIds: DIMENSION_TOOL_IDS },
 ];
 
 /**
@@ -384,6 +413,30 @@ export function SketchMode({
   const [sketchImport, setSketchImport] = useState<SketchImportOutcome | null>(
     null,
   );
+  // The CENTER zone's measured frame: the canvas renders at the frame's
+  // real size (never scaled — the canvas's pointer math is 1:1 with CSS
+  // pixels, so a transform would break every pick), and falls back to the
+  // documented constants until a layout exists. See ./sketch-canvas-frame.
+  const canvasFrameRef = useRef<HTMLDivElement | null>(null);
+  const [canvasBox, setCanvasBox] = useState<SketchCanvasBox | null>(null);
+  useEffect(() => {
+    const frame = canvasFrameRef.current;
+    if (frame === null) return;
+    if (typeof ResizeObserver === "undefined") {
+      const { height, width } = frame.getBoundingClientRect();
+      setCanvasBox({ height, width });
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      const { height, width } = frame.getBoundingClientRect();
+      setCanvasBox({ height, width });
+    });
+    observer.observe(frame);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+  const canvasSize = sketchCanvasSize(canvasBox, SKETCH_CANVAS);
 
   // The displayed sketch: the authored sketch with the drag's provisional
   // geometry overlaid — the value the solve loop re-solves per move.
@@ -1343,6 +1396,46 @@ export function SketchMode({
     }
   })();
 
+  // The strip's marks (the one iconography record the model strip uses).
+  const exitIcon = CAD_SKETCH_COMMAND_ICONS.exitSketch;
+  const extrudeIcon = CAD_SKETCH_COMMAND_ICONS.extrude;
+  const revolveIcon = CAD_SKETCH_COMMAND_ICONS.revolve;
+  const saveIcon = CAD_SKETCH_COMMAND_ICONS.saveSketch;
+  const importIcon = CAD_SKETCH_COMMAND_ICONS.importSketch;
+  const ExitIcon = exitIcon.icon;
+  const ExtrudeIcon = extrudeIcon.icon;
+  const RevolveIcon = revolveIcon.icon;
+  const SaveIcon = saveIcon.icon;
+  const ImportIcon = importIcon.icon;
+  const UndoIcon = CAD_MODEL_COMMAND_ICONS.undo.icon;
+  const RedoIcon = CAD_MODEL_COMMAND_ICONS.redo.icon;
+
+  /** The strip's pinned trailing cluster: the sketch session's history. */
+  const history = (
+    <ToolGroup label="Sketch history" separated={false}>
+      <ToolButton
+        aria-label="Undo"
+        data-testid="sketch-undo"
+        disabled={!canUndoSketch(session)}
+        onClick={undo}
+        size="icon"
+        title="Undo the last sketch transaction."
+      >
+        <UndoIcon aria-hidden="true" />
+      </ToolButton>
+      <ToolButton
+        aria-label="Redo"
+        data-testid="sketch-redo"
+        disabled={!canRedoSketch(session)}
+        onClick={redo}
+        size="icon"
+        title="Redo the next sketch transaction."
+      >
+        <RedoIcon aria-hidden="true" />
+      </ToolButton>
+    </ToolGroup>
+  );
+
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape") {
       dispatch({ type: "escape" });
@@ -1419,98 +1512,114 @@ export function SketchMode({
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      {/* The sketch command row: mode exit, tool strip, undo/redo. */}
-      <div className="border-border bg-card/50 flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
-        <Button
-          data-testid="workbench-mode-toggle"
-          onClick={onExit}
-          size="xs"
-          type="button"
-          variant="outline"
-        >
-          Model
-        </Button>
-        <Button
-          data-testid="sketch-extrude"
-          disabled={extrudeDisabled}
-          onClick={extrude}
-          size="xs"
-          title={extrudeDisabled ? extrudeDisabledTitle : undefined}
-          type="button"
-          variant="outline"
-        >
-          Extrude
-        </Button>
-        {/* The Phase 38 save action: commits the sketch as a standalone
-            document record for the sweep/loft forms to pick from. Rendered
-            only when the host carries the action; disabled on an empty
-            canvas — an empty record would resolve nothing. */}
-        {onSaveSketch === undefined ? null : (
-          <Button
-            data-testid="sketch-save"
-            disabled={session.sketch.entities.length === 0}
-            onClick={save}
-            size="xs"
-            title="Save this sketch to the document; sweep and loft pick their sketches from the saved pool."
-            type="button"
-            variant="outline"
+      {/* TOP — the sketch mode's tool strip: the same `--appbar-h` icon
+          strip the model mode has, with the sketch's clusters in it. The
+          `bg-card/50` row of text verbs (and the wrapping 36-word
+          toolbar it hosted inline) is gone. */}
+      <ToolStrip data-zone="top" label="Sketch workspace" overflow={history}>
+        <ToolGroup label="Mode">
+          <ToolButton
+            aria-label={exitIcon.label}
+            data-testid="workbench-mode-toggle"
+            onClick={onExit}
+            size="icon"
+            title="Leave the sketch and return to the model workspace."
           >
-            Save
-          </Button>
-        )}
-        {/* The revolve action: the axis selector (a workplane axis — the
-            axis line runs through the workplane origin along it) pinned as
-            authoring state, then the action button. The selected axis is
-            machine-visible through data-sketch-revolve-axis. Rendered only
-            when the host carries the action — a host without it shows no
-            dead controls. */}
-        {onRevolve === undefined ? null : (
-          <>
-            <div
-              aria-label="Revolve axis"
-              className="flex items-center gap-1"
-              role="group"
-            >
-              <span className="text-muted-foreground pl-1 text-xs">axis</span>
-              <Button
-                aria-pressed={revolveAxis === "x"}
-                data-testid="revolve-axis-x"
-                onClick={() => {
-                  setRevolveAxis("x");
-                }}
-                size="xs"
-                type="button"
-                variant={revolveAxis === "x" ? "default" : "outline"}
+            <ExitIcon aria-hidden="true" />
+          </ToolButton>
+        </ToolGroup>
+        <ToolGroup label="Commit">
+          {/* Extrude is THE sketch's confirming action — the one verb
+              that turns the profile into geometry, and so the one place
+              the signal colour appears on a momentary control here. */}
+          <ToolButton
+            aria-label={extrudeIcon.label}
+            className="border-signal/60 hover:not-disabled:bg-signal/10 [&>svg]:text-signal"
+            data-testid="sketch-extrude"
+            disabled={extrudeDisabled}
+            onClick={extrude}
+            size="icon"
+            title={
+              extrudeDisabled
+                ? (extrudeDisabledTitle ?? "Extrude is unavailable here.")
+                : "Extrude the solved profile into a solid."
+            }
+          >
+            <ExtrudeIcon aria-hidden="true" />
+          </ToolButton>
+          {/* The revolve action: the axis selector (a workplane axis — the
+              axis line runs through the workplane origin along it) pinned as
+              authoring state, then the action button. The selected axis is
+              machine-visible through data-sketch-revolve-axis. Rendered only
+              when the host carries the action — a host without it shows no
+              dead controls. */}
+          {onRevolve === undefined ? null : (
+            <>
+              <ToolButton
+                aria-label={revolveIcon.label}
+                data-testid="sketch-revolve"
+                onClick={revolve}
+                size="icon"
+                title="Revolve the solved profile about the selected workplane axis."
               >
-                X
-              </Button>
-              <Button
-                aria-pressed={revolveAxis === "y"}
-                data-testid="revolve-axis-y"
-                onClick={() => {
-                  setRevolveAxis("y");
-                }}
-                size="xs"
-                type="button"
-                variant={revolveAxis === "y" ? "default" : "outline"}
+                <RevolveIcon aria-hidden="true" />
+              </ToolButton>
+              {/* The axis pair is written out, not mapped: these two
+                  `data-testid`s are LITERAL handles in the presentation
+                  surface, and a template would publish them as dynamic. */}
+              <ToolGroup
+                className="gap-0"
+                label="Revolve axis"
+                separated={false}
               >
-                Y
-              </Button>
-            </div>
-            <Button
-              data-testid="sketch-revolve"
-              onClick={revolve}
-              size="xs"
-              type="button"
-              variant="outline"
+                <ToolButton
+                  aria-label="Revolve about X"
+                  aria-pressed={revolveAxis === "x"}
+                  className="w-(--control-h) justify-center px-0 font-mono"
+                  data-testid="revolve-axis-x"
+                  onClick={() => {
+                    setRevolveAxis("x");
+                  }}
+                  size="sm"
+                  title="Revolve about the workplane X axis."
+                >
+                  X
+                </ToolButton>
+                <ToolButton
+                  aria-label="Revolve about Y"
+                  aria-pressed={revolveAxis === "y"}
+                  className="w-(--control-h) justify-center px-0 font-mono"
+                  data-testid="revolve-axis-y"
+                  onClick={() => {
+                    setRevolveAxis("y");
+                  }}
+                  size="sm"
+                  title="Revolve about the workplane Y axis."
+                >
+                  Y
+                </ToolButton>
+              </ToolGroup>
+            </>
+          )}
+          {/* The Phase 38 save action: commits the sketch as a standalone
+              document record for the sweep/loft forms to pick from. Rendered
+              only when the host carries the action; disabled on an empty
+              canvas — an empty record would resolve nothing. */}
+          {onSaveSketch === undefined ? null : (
+            <ToolButton
+              aria-label={saveIcon.label}
+              data-testid="sketch-save"
+              disabled={session.sketch.entities.length === 0}
+              onClick={save}
+              size="icon"
+              title="Save this sketch to the document; sweep and loft pick their sketches from the saved pool."
             >
-              Revolve
-            </Button>
-          </>
-        )}
+              <SaveIcon aria-hidden="true" />
+            </ToolButton>
+          )}
+        </ToolGroup>
         <CadSketchToolbar
           activeToolId={editor.tool}
-          className="border-0 bg-transparent p-0"
           groups={TOOLBAR_GROUPS}
           onActivate={(toolId) => {
             if (isSketchToolId(toolId)) {
@@ -1523,90 +1632,80 @@ export function SketchMode({
             outcome surfaces on the status line below. Rendered only when the
             host carries the exchange control — the plain workbench (the
             byte-stable render battery's fixture) omits it, so its resting
-            command row keeps the exact pre-exchange layout the
-            scroll-sensitive deterministic canvas captures freeze. */}
+            strip keeps the exact pre-exchange control set. The native file
+            input is a LABEL-wrapped control: the strip shows the mark, the
+            input itself stays the real, keyboard-reachable file picker. */}
         {importSketchFiles ? (
-          <input
-            accept=".dxf,.svg"
-            aria-label="Import DXF or SVG into the active sketch"
-            className="border-input bg-background file:bg-background file:text-foreground h-7 w-48 rounded-none border px-1 text-xs"
-            data-testid="sketch-import-file"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file !== undefined) importSketchFile(file);
-              event.target.value = "";
-            }}
-            type="file"
-          />
+          <ToolGroup label="Exchange">
+            <label
+              className="relative inline-flex size-(--tool-h) shrink-0 cursor-pointer items-center justify-center rounded-sm border border-transparent text-ink-dim transition-[background-color,color] duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-(--focus)"
+              title={`${importIcon.label} into the active sketch (one undoable transaction).`}
+            >
+              <ImportIcon aria-hidden="true" className="size-3.5" />
+              <input
+                accept=".dxf,.svg"
+                aria-label="Import DXF or SVG into the active sketch"
+                className="absolute inset-0 cursor-pointer opacity-0"
+                data-testid="sketch-import-file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file !== undefined) importSketchFile(file);
+                  event.target.value = "";
+                }}
+                type="file"
+              />
+            </label>
+          </ToolGroup>
         ) : null}
-        <div className="flex-1" />
+      </ToolStrip>
+      {/* CENTER + RIGHT — the workspace: the canvas FILLS its frame (it
+          used to be a fixed-size document centred in a scrolling,
+          wrapping stage), and the inspector is a docked rail on the
+          cockpit's own panel rung. */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
-          aria-label="Sketch history"
-          className="flex items-center gap-1"
-          role="group"
+          className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-viewport"
+          data-zone="center"
+          ref={canvasFrameRef}
         >
-          <Button
-            data-testid="sketch-undo"
-            disabled={!canUndoSketch(session)}
-            onClick={undo}
-            size="xs"
-            type="button"
-            variant="ghost"
-          >
-            <Undo2 data-icon="inline-start" />
-            Undo
-          </Button>
-          <Button
-            data-testid="sketch-redo"
-            disabled={!canRedoSketch(session)}
-            onClick={redo}
-            size="xs"
-            type="button"
-            variant="ghost"
-          >
-            <Redo2 data-icon="inline-start" />
-            Redo
-          </Button>
+          <CadSketchCanvas
+            annotations={view.annotations}
+            className="absolute inset-0 border-0"
+            dimensions={view.dimensions}
+            draggingEntityId={editor.drag?.entityId ?? null}
+            entities={view.entities}
+            entityDof={view.entityDof}
+            gridStep={SKETCH_CANVAS.gridStep}
+            height={canvasSize.height}
+            hoveredEntityId={editor.hoveredEntityId}
+            onDragEnd={(point) => {
+              dispatch({ point, type: "drag-end" });
+            }}
+            onDragMove={(point) => {
+              dispatch({ point, type: "drag-move" });
+            }}
+            onDragStart={(drag) => {
+              dispatch({
+                entityId: drag.entityId,
+                point: drag.point,
+                type: "drag-start",
+              });
+            }}
+            onHover={(entityId) => {
+              dispatch({ entityId, type: "hover" });
+            }}
+            onMove={setPointer}
+            onPick={({ entityId, point }) => {
+              dispatch({ entityId, point, type: "canvas-pick" });
+            }}
+            origin={SKETCH_CANVAS.origin}
+            picks={pickMarkers}
+            preview={preview}
+            regions={view.regions}
+            scale={SKETCH_CANVAS.scale}
+            width={canvasSize.width}
+          />
         </div>
-      </div>
-      {/* The workspace: canvas dominant, inspector docked right. */}
-      <div className="flex min-h-0 flex-1 flex-wrap items-start justify-center gap-3 overflow-y-auto p-3">
-        <CadSketchCanvas
-          annotations={view.annotations}
-          dimensions={view.dimensions}
-          draggingEntityId={editor.drag?.entityId ?? null}
-          entities={view.entities}
-          entityDof={view.entityDof}
-          gridStep={SKETCH_CANVAS.gridStep}
-          height={SKETCH_CANVAS.height}
-          hoveredEntityId={editor.hoveredEntityId}
-          onDragEnd={(point) => {
-            dispatch({ point, type: "drag-end" });
-          }}
-          onDragMove={(point) => {
-            dispatch({ point, type: "drag-move" });
-          }}
-          onDragStart={(drag) => {
-            dispatch({
-              entityId: drag.entityId,
-              point: drag.point,
-              type: "drag-start",
-            });
-          }}
-          onHover={(entityId) => {
-            dispatch({ entityId, type: "hover" });
-          }}
-          onMove={setPointer}
-          onPick={({ entityId, point }) => {
-            dispatch({ entityId, point, type: "canvas-pick" });
-          }}
-          origin={SKETCH_CANVAS.origin}
-          picks={pickMarkers}
-          preview={preview}
-          regions={view.regions}
-          scale={SKETCH_CANVAS.scale}
-          width={SKETCH_CANVAS.width}
-        />
         <CadSketchInspector
           array={
             editor.tool === "rectArray" || editor.tool === "circArray"
@@ -1616,7 +1715,7 @@ export function SketchMode({
                 }
               : null
           }
-          className="shrink-0"
+          className="shrink-0 border-l border-rule"
           constraints={inspectorConstraints}
           convert={
             convertList === null
@@ -1663,17 +1762,29 @@ export function SketchMode({
           solveStatus={solveState.status}
         />
       </div>
-      {/* The sketch status line: the editor status plus the solver readout. */}
+      {/* BOTTOM — the sketch status band: the editor status, then the
+          counts and the solver readout as DRO cells. Off `text-[11px]`
+          and `bg-card/50`; on the status band's own rung and the type
+          scale's data size, like every other readout in the cockpit. */}
       <div
-        className="border-border bg-card/50 text-muted-foreground flex h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-[11px]"
+        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-chrome px-(--pad-panel) font-mono text-data whitespace-nowrap text-ink-dim"
         data-testid="sketch-status"
+        data-zone="bottom"
       >
+        <StatusDot
+          label={
+            effectiveStatus.severity === "error"
+              ? "Sketch status: error"
+              : "Sketch status: ok"
+          }
+          tone={effectiveStatus.severity === "error" ? "error" : "ok"}
+        />
         <span
           aria-live="polite"
           className={
             effectiveStatus.severity === "error"
-              ? "text-destructive"
-              : undefined
+              ? "min-w-0 truncate text-destructive"
+              : "min-w-0 truncate"
           }
           data-sketch-status-severity={editor.status.severity}
           data-testid="sketch-status-message"
@@ -1683,21 +1794,38 @@ export function SketchMode({
         {sketchImport === null ? null : (
           <span
             className={
-              sketchImport.status === "failed" ? "text-destructive" : undefined
+              sketchImport.status === "failed"
+                ? "min-w-0 truncate text-destructive"
+                : "min-w-0 truncate"
             }
             data-testid="sketch-import-outcome"
           >
             {sketchImport.message}
           </span>
         )}
-        <span className="ml-auto">
-          entities = {String(authoredSurface.entities.length)}
-        </span>
-        <span>constraints = {String(authoredSurface.constraints.length)}</span>
-        <span>commands = {String(commandLog.length)}</span>
-        <span data-testid="sketch-status-solve">
-          solve = {solveState.status}
-          {solveState.dof === null ? "" : ` (dof ${String(solveState.dof)})`}
+        <span className="ml-auto flex shrink-0 items-center gap-(--gap-group)">
+          <span>
+            entities{" "}
+            <span className="text-ink tabular">
+              {String(authoredSurface.entities.length)}
+            </span>
+          </span>
+          <span>
+            constraints{" "}
+            <span className="text-ink tabular">
+              {String(authoredSurface.constraints.length)}
+            </span>
+          </span>
+          <span>
+            commands{" "}
+            <span className="text-ink tabular">
+              {String(commandLog.length)}
+            </span>
+          </span>
+          <span data-testid="sketch-status-solve">
+            solve <span className="text-ink tabular">{solveState.status}</span>
+            {solveState.dof === null ? "" : ` (dof ${String(solveState.dof)})`}
+          </span>
         </span>
       </div>
     </div>

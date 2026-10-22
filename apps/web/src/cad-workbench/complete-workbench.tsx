@@ -2684,6 +2684,7 @@ export function CompleteCadWorkbench({
             : formatBoundsExtents(applied.state.measurement.bounds)
         }
         featureCount={timeline === null ? null : timeline.length}
+        hidden={mode === "sketch"}
         sceneKind={showingPreview ? "import" : engine.activeScene}
         settled={settled}
         statusBar={statusBar}

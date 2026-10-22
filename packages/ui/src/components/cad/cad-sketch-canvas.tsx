@@ -628,25 +628,41 @@ export function CadSketchCanvas({
     [eventToWorkplane, onDragEnd],
   );
 
-  // Colors: severity-driven, driven through fixed class tokens so the
-  // surface stays on the design system (no raw hexes). The Phase 37 ink
-  // convention rides the same gate: under-constrained geometry (dof > 0)
-  // renders blue; diagnostics and selection still win — a problem is a
-  // problem even when constrained.
-  const UNDER_CONSTRAINED_INK = "var(--color-sky-600, #0284c7)";
-  const DRAG_INK = "var(--color-violet-500, #8b5cf6)";
+  // Colors: severity-driven, and on the VIEWPORT surface's own tokens.
+  //
+  // The canvas is a viewport, not chrome: it is the sketch's machine bed,
+  // so its ink comes from `--viewport-*` (declared per scheme × register
+  // from the viewport's own two inputs) and never from `--foreground` /
+  // `--background` / a raw palette ramp. It used to reach straight for
+  // `--color-sky-400`, `--color-sky-600`, `--color-amber-500`,
+  // `--color-violet-500` and `--color-border`, which is a second colour
+  // family beside the scheme's and the reason a sketch never looked like
+  // the same instrument as the model.
+  //
+  // The Phase 37 ink convention is unchanged in MEANING: under-constrained
+  // geometry (dof > 0) still reads blue — now the system's own
+  // `--status-parked` blue; diagnostics and selection still win, and
+  // SELECTION is the domain signal `--viewport-select` (the same amber the
+  // 3D viewport highlights with, by contract).
+  const UNDER_CONSTRAINED_INK = "var(--status-parked)";
+  // A dragged entity is the one being MANIPULATED, so it reads as the
+  // live one: the domain's selection signal, with the drag's own
+  // `data-sketch-dragging` state as the machine-readable truth. It used
+  // to be a violet of its own — a sixth colour family on one surface.
+  const DRAG_INK = "var(--viewport-select)";
   const strokeFor = (entity: CadSketchCanvasEntity): string => {
-    if (entity.diagnostic === "error")
-      return "var(--color-destructive, #dc2626)";
-    if (entity.diagnostic === "warning")
-      return "var(--color-amber-500, #f59e0b)";
+    if (entity.diagnostic === "error") return "var(--destructive)";
+    // The system's warn ink is the signal (the `StatusDot` warn lamp is
+    // the same token); a warned entity also keeps its badge beside it, so
+    // the colour is never the only carrier.
+    if (entity.diagnostic === "warning") return "var(--signal)";
     if (dragging && entity.id === draggingEntityId) return DRAG_INK;
-    if (entity.selected) return "var(--color-sky-400, #38bdf8)";
-    if (entity.construction) return "var(--color-muted-foreground, #71717a)";
+    if (entity.selected) return "var(--viewport-select)";
+    if (entity.construction) return "var(--viewport-ink-dim)";
     if (entityDof !== undefined && (entityDof.get(entity.id) ?? 0) > 0) {
       return UNDER_CONSTRAINED_INK;
     }
-    return "var(--color-foreground, #0a0a0a)";
+    return "var(--viewport-ink)";
   };
 
   const strokeWidthFor = (entity: CadSketchCanvasEntity): number => {
@@ -692,7 +708,7 @@ export function CadSketchCanvas({
             signed === 0 ? null : (
               <line
                 key={`grid-v-${String(signed)}`}
-                stroke="var(--color-border, #e4e4e7)"
+                stroke="var(--viewport-rule)"
                 strokeWidth={1}
                 x1={screen.x}
                 x2={screen.x}
@@ -711,7 +727,7 @@ export function CadSketchCanvas({
             signed === 0 ? null : (
               <line
                 key={`grid-h-${String(signed)}`}
-                stroke="var(--color-border, #e4e4e7)"
+                stroke="var(--viewport-rule)"
                 strokeWidth={1}
                 x1={0}
                 x2={width}
@@ -730,7 +746,7 @@ export function CadSketchCanvas({
     return (
       <g aria-hidden="true">
         <line
-          stroke="var(--color-muted-foreground, #71717a)"
+          stroke="var(--viewport-rule-strong)"
           strokeWidth={1.25}
           x1={0}
           x2={width}
@@ -738,7 +754,7 @@ export function CadSketchCanvas({
           y2={originScreen.y}
         />
         <line
-          stroke="var(--color-muted-foreground, #71717a)"
+          stroke="var(--viewport-rule-strong)"
           strokeWidth={1.25}
           x1={originScreen.x}
           x2={originScreen.x}
@@ -746,7 +762,7 @@ export function CadSketchCanvas({
           y2={height}
         />
         <text
-          className="fill-muted-foreground font-mono"
+          className="fill-viewport-ink-dim font-mono"
           fontSize={10}
           x={width - 14}
           y={originScreen.y - 6}
@@ -754,7 +770,7 @@ export function CadSketchCanvas({
           X
         </text>
         <text
-          className="fill-muted-foreground font-mono"
+          className="fill-viewport-ink-dim font-mono"
           fontSize={10}
           x={originScreen.x + 6}
           y={14}
@@ -905,10 +921,10 @@ export function CadSketchCanvas({
     const screenPoints = region.points.map(toScreen);
     const fill =
       region.diagnostic === "error"
-        ? "var(--color-destructive, #dc2626)"
+        ? "var(--destructive)"
         : region.selected
-          ? "var(--color-sky-400, #38bdf8)"
-          : "var(--color-foreground, #0a0a0a)";
+          ? "var(--viewport-select)"
+          : "var(--viewport-ink)";
     return (
       <polygon
         key={region.id}
@@ -950,12 +966,12 @@ export function CadSketchCanvas({
       };
       return (
         <polygon
-          fill="var(--color-sky-600, #0284c7)"
+          fill="var(--viewport-ink-dim)"
           points={`${at.x},${at.y} ${p1.x},${p1.y} ${p2.x},${p2.y}`}
         />
       );
     };
-    const stroke = "var(--color-sky-600, #0284c7)";
+    const stroke = "var(--viewport-ink-dim)";
     const shape = (() => {
       switch (dimension.kind) {
         case "linear": {
@@ -1094,15 +1110,15 @@ export function CadSketchCanvas({
     const screen = toScreen({ x: annotation.x, y: annotation.y });
     const color =
       annotation.level === "error"
-        ? "var(--color-destructive, #dc2626)"
+        ? "var(--destructive)"
         : annotation.level === "warning"
-          ? "var(--color-amber-600, #d97706)"
-          : "var(--color-sky-600, #0284c7)";
+          ? "var(--signal)"
+          : "var(--viewport-ink-dim)";
     const textWidth = annotation.text.length * 6.2 + 8;
     return (
       <g key={annotation.id} data-sketch-annotation-id={annotation.id}>
         <rect
-          fill="var(--color-background, #ffffff)"
+          fill="var(--viewport)"
           fillOpacity={0.85}
           height={15}
           rx={2}
@@ -1131,14 +1147,14 @@ export function CadSketchCanvas({
       <g key={`pick-${String(index)}`}>
         <circle
           cy={screen.y}
-          fill="var(--color-sky-400, #38bdf8)"
+          fill="var(--viewport-select)"
           r={4}
-          stroke="var(--color-background, #ffffff)"
+          stroke="var(--viewport)"
           strokeWidth={1.5}
           cx={screen.x}
         />
         <text
-          fill="var(--color-sky-400, #38bdf8)"
+          fill="var(--viewport-select)"
           fontSize={9}
           fontFamily="ui-monospace, monospace"
           x={screen.x + 6}
@@ -1157,7 +1173,7 @@ export function CadSketchCanvas({
       return (
         <line
           aria-hidden="true"
-          stroke="var(--color-sky-400, #38bdf8)"
+          stroke="var(--viewport-select)"
           strokeDasharray="4 3"
           strokeWidth={1.5}
           x1={from.x}
@@ -1173,10 +1189,10 @@ export function CadSketchCanvas({
       return (
         <rect
           aria-hidden="true"
-          fill="var(--color-sky-400, #38bdf8)"
+          fill="var(--viewport-select)"
           fillOpacity={0.05}
           height={Math.abs(to.y - from.y)}
-          stroke="var(--color-sky-400, #38bdf8)"
+          stroke="var(--viewport-select)"
           strokeDasharray="4 3"
           strokeWidth={1.5}
           width={Math.abs(to.x - from.x)}
@@ -1194,7 +1210,7 @@ export function CadSketchCanvas({
           cy={center.y}
           fill="none"
           r={Math.max(preview.radius * scale, 0.01)}
-          stroke="var(--color-sky-400, #38bdf8)"
+          stroke="var(--viewport-select)"
           strokeDasharray="4 3"
           strokeWidth={1.5}
         />
@@ -1211,7 +1227,7 @@ export function CadSketchCanvas({
           fill="none"
           rx={Math.max(preview.radiusX * scale, 0.01)}
           ry={Math.max(preview.radiusY * scale, 0.01)}
-          stroke="var(--color-sky-400, #38bdf8)"
+          stroke="var(--viewport-select)"
           strokeDasharray="4 3"
           strokeWidth={1.5}
           transform={`rotate(${-rotationDegrees} ${center.x} ${center.y})`}
@@ -1227,7 +1243,7 @@ export function CadSketchCanvas({
           points={screenPoints
             .map((point) => `${point.x},${point.y}`)
             .join(" ")}
-          stroke="var(--color-sky-400, #38bdf8)"
+          stroke="var(--viewport-select)"
           strokeDasharray="4 3"
           strokeWidth={1.5}
         />
@@ -1238,12 +1254,12 @@ export function CadSketchCanvas({
 
   return (
     <div
-      className={cn("border-border bg-background relative border", className)}
+      className={cn("relative bg-viewport", className)}
       data-hover-entity={hoveredEntityId ?? ""}
       data-slot="cad-sketch-canvas"
     >
       <span
-        className="border-border bg-background text-muted-foreground absolute top-1.5 right-1.5 z-10 border px-1.5 py-0.5 font-mono text-[10px] tracking-wider"
+        className="absolute top-1.5 right-1.5 z-10 rounded-sm border border-viewport-rule bg-viewport-scrim px-1.5 py-0.5 font-mono text-micro tracking-wider text-viewport-ink-dim"
         data-slot="cad-sketch-workplane-badge"
       >
         {labels.workplaneBadge}

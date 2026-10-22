@@ -53,7 +53,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
+import type { StatusTone } from "../cockpit/property-row";
 
+import { Panel, PanelBody, PanelHeader, PanelSection } from "../cockpit/panel";
+import { StatusDot } from "../cockpit/property-row";
 import {
   expressionNumberProblem,
   expressionNumberTokenName,
@@ -275,28 +278,47 @@ export interface CadSketchInspectorProps {
   readonly className?: string;
 }
 
-/** The list status classes: quiet when healthy, loud on problems. */
+/**
+ * The list status classes: quiet when healthy, loud on problems — on the
+ * SYSTEM's status ink, never on a raw palette ramp. The old map reached
+ * for `text-amber-600 dark:text-amber-400`, `text-emerald-*` and
+ * `text-sky-*`, which is a second colour family beside the scheme's own
+ * and the reason the inspector never matched the cockpit it docks in.
+ */
 const STATUS_CLASSES: Readonly<Record<CadSketchConstraintStatus, string>> =
   Object.freeze({
-    ok: "text-muted-foreground",
-    warning: "text-amber-600 dark:text-amber-400 font-medium",
-    error: "text-destructive font-medium",
+    ok: "text-ink-dim",
+    warning: "text-signal",
+    error: "text-destructive",
   });
 
 const SEVERITY_CLASSES: Readonly<
   Record<CadSketchInspectorDiagnostic["severity"], string>
 > = Object.freeze({
-  info: "text-sky-600 dark:text-sky-400",
-  warning: "text-amber-600 dark:text-amber-400",
+  info: "text-ink-dim",
+  warning: "text-signal",
   error: "text-destructive",
 });
 
 const SOLVE_CLASSES: Readonly<Record<CadSketchSolveStatus, string>> =
   Object.freeze({
-    solved: "text-emerald-600 dark:text-emerald-400",
-    "under-constrained": "text-amber-600 dark:text-amber-400",
-    failed: "text-destructive font-medium",
+    solved: "text-status-ok",
+    "under-constrained": "text-signal",
+    failed: "text-destructive",
   });
+
+/** The solver status as a lamp tone (colour is never the only carrier). */
+const SOLVE_TONES: Readonly<Record<CadSketchSolveStatus, StatusTone>> =
+  Object.freeze({
+    solved: "ok",
+    "under-constrained": "warn",
+    failed: "error",
+  });
+
+/** The constraint row's dot tone (the list's own health lamp). */
+const CONSTRAINT_TONES: Readonly<
+  Record<CadSketchConstraintStatus, StatusTone>
+> = Object.freeze({ ok: "idle", warning: "warn", error: "error" });
 
 /** The inspector's form values: one value field keyed by constraint id. */
 type DimensionFormValues = Record<string, number | string | undefined>;
@@ -662,257 +684,286 @@ export function CadSketchInspector({
   });
 
   return (
-    <div
-      className={cn(
-        "border-border bg-background w-60 border text-sm",
-        className,
-      )}
+    <Panel
+      className={cn("w-(--rail-w)", className)}
       data-slot="cad-sketch-inspector"
       data-sketch-inspector-selected-constraint={selectedConstraintId ?? ""}
       data-sketch-inspector-solve-status={solveStatus}
       data-sketch-inspector-dof={String(dof)}
+      data-zone="right"
+      flush
     >
-      <div className="text-muted-foreground border-border border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
-        {labels.title}
-      </div>
-      <section
-        aria-label={labels.solverHeading}
-        className="border-border flex items-center gap-2 border-b px-2 py-1.5"
-      >
-        <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
-          {labels.solverHeading}
-        </span>
-        <span
-          className={`${SOLVE_CLASSES[solveStatus]} whitespace-nowrap font-mono text-xs`}
-          data-testid="sketch-solve-status"
-        >
-          {labels.statusLabels[solveStatus]}
-        </span>
-        <span className="ml-auto whitespace-nowrap font-mono text-xs">
-          {labels.dofLabel} {String(dof)}
-        </span>
-      </section>
-      <section aria-label={labels.constraintsHeading} className="border-b">
-        <div className="text-muted-foreground px-2 pt-1.5 text-[10px] font-medium tracking-wider uppercase">
-          {labels.constraintsHeading}
-        </div>
-        {constraints.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-2">
-            {labels.emptyConstraints}
-          </div>
-        ) : (
-          <ul className="px-1 py-1">
-            {constraints.map((constraint) => {
-              const selected = constraint.id === selectedConstraintId;
-              return (
-                <li key={constraint.id}>
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 px-1 py-0.5 text-left text-xs outline-none hover:bg-muted/60 focus-visible:ring-1 focus-visible:ring-ring/50",
-                      selected && "bg-muted",
-                    )}
-                    data-sketch-constraint-id={constraint.id}
-                    data-sketch-constraint-status={constraint.status}
-                    title={constraint.message ?? constraint.label}
-                    onClick={() => {
-                      onSelectConstraint(selected ? null : constraint.id);
-                    }}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        constraint.status === "error" && "bg-destructive",
-                        constraint.status === "warning" && "bg-amber-500",
-                        constraint.status === "ok" && "bg-muted-foreground/40",
-                      )}
-                    />
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate font-mono",
-                        STATUS_CLASSES[constraint.status],
-                      )}
-                    >
-                      {constraint.label}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-      <section
-        aria-label={labels.dimensionHeading}
-        className="border-border border-b px-2 py-2"
-      >
-        {dimension === null ? (
-          <p className="text-muted-foreground text-xs leading-4">
-            {labels.dimensionHint}
-          </p>
-        ) : (
-          <>
-            {/* The dimension editor is mounted PER constraint (the key):
-                each selection remounts a fresh form seeded with that
-                constraint's live document value — see the editor's doc. */}
-            <DimensionEditorForm
-              key={dimension.constraintId}
-              dimension={dimension}
-              labels={labels}
-              onApplyFailure={setApplyFailure}
-              onEditDimension={onEditDimension}
-              parameterNames={parameterNames}
+      {/* The name strip carries the solver readout, because the solver IS
+          the sketch's headline state: status lamp, status word, degrees of
+          freedom. It used to be a section of its own with a duplicate
+          small-caps "Solver" label above a one-line readout. */}
+      <PanelHeader
+        title={labels.title}
+        trailing={
+          <span
+            aria-label={labels.solverHeading}
+            className="flex items-center gap-(--gap-tight)"
+            role="group"
+          >
+            <StatusDot
+              label={`${labels.solverHeading}: ${labels.statusLabels[solveStatus]}`}
+              tone={SOLVE_TONES[solveStatus]}
             />
-            {applyFailure !== undefined ? (
-              <div
-                className="text-destructive pt-1 text-xs leading-4"
-                data-testid="sketch-dimension-error"
-                role="alert"
-              >
-                {applyFailure}
-              </div>
-            ) : null}
-          </>
-        )}
-      </section>
-      {/* The Phase 37 array-pattern form: rendered while an array tool is
-          active; applies against the live selection. */}
-      {array !== null ? (
-        <section
-          aria-label={labels.arrayHeading}
-          className="border-border border-b px-2 py-2"
-          data-sketch-array-tool={array.tool}
-          data-sketch-array-selection={String(array.selectionCount)}
+            <span
+              className={cn("whitespace-nowrap", SOLVE_CLASSES[solveStatus])}
+              data-testid="sketch-solve-status"
+            >
+              {labels.statusLabels[solveStatus]}
+            </span>
+            <span className="whitespace-nowrap text-ink-faint tabular">
+              {labels.dofLabel} {String(dof)}
+            </span>
+          </span>
+        }
+      />
+      <PanelBody>
+        <PanelSection
+          aria-label={labels.constraintsHeading}
+          role="group"
+          title={labels.constraintsHeading}
+          trailing={String(constraints.length)}
         >
-          <div className="text-muted-foreground pb-1 text-[10px] font-medium tracking-wider uppercase">
-            {labels.arrayHeading}
+          {constraints.length === 0 ? (
+            <p className="px-(--pad-panel) py-(--pad-row) text-ui text-ink-faint">
+              {labels.emptyConstraints}
+            </p>
+          ) : (
+            <ul>
+              {constraints.map((constraint) => {
+                const selected = constraint.id === selectedConstraintId;
+                return (
+                  <li key={constraint.id}>
+                    {/* A selected row is the SYSTEM's selection: the wash
+                        plus the signal edge on the inline start, published
+                        as `data-selected` as well as `aria-pressed`. */}
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      className={cn(
+                        "relative flex h-(--row-h) w-full cursor-pointer items-center",
+                        "gap-(--gap) border-l-2 border-transparent px-(--pad-row)",
+                        "text-left text-ui text-ink-dim focus-instrument",
+                        "transition-colors duration-(--dur-state)",
+                        "ease-(--ease-instrument) hover:bg-well",
+                        "data-selected:border-l-select-edge",
+                        "data-selected:bg-select-wash data-selected:text-ink",
+                      )}
+                      data-selected={selected ? "" : undefined}
+                      data-sketch-constraint-id={constraint.id}
+                      data-sketch-constraint-status={constraint.status}
+                      title={constraint.message ?? constraint.label}
+                      onClick={() => {
+                        onSelectConstraint(selected ? null : constraint.id);
+                      }}
+                    >
+                      <StatusDot
+                        label={`${constraint.kind}: ${constraint.status}`}
+                        tone={CONSTRAINT_TONES[constraint.status]}
+                      />
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate font-mono text-data",
+                          STATUS_CLASSES[constraint.status],
+                        )}
+                      >
+                        {constraint.label}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </PanelSection>
+        <PanelSection
+          aria-label={labels.dimensionHeading}
+          role="group"
+          title={labels.dimensionHeading}
+        >
+          <div className="p-(--pad-panel)">
+            {dimension === null ? (
+              <p className="text-label text-ink-faint">
+                {labels.dimensionHint}
+              </p>
+            ) : (
+              <>
+                {/* The dimension editor is mounted PER constraint (the
+                    key): each selection remounts a fresh form seeded with
+                    that constraint's live document value — see the
+                    editor's doc. */}
+                <DimensionEditorForm
+                  key={dimension.constraintId}
+                  dimension={dimension}
+                  labels={labels}
+                  onApplyFailure={setApplyFailure}
+                  onEditDimension={onEditDimension}
+                  parameterNames={parameterNames}
+                />
+                {applyFailure !== undefined ? (
+                  <div
+                    className="pt-(--gap-tight) text-label text-destructive"
+                    data-testid="sketch-dimension-error"
+                    role="alert"
+                  >
+                    {applyFailure}
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
-          {array.selectionCount === 0 ? (
-            <p className="text-muted-foreground text-xs leading-4">
-              {labels.arrayNoSelection}
+        </PanelSection>
+        {/* The Phase 37 array-pattern form: rendered while an array tool is
+            active; applies against the live selection. */}
+        {array !== null ? (
+          <PanelSection
+            aria-label={labels.arrayHeading}
+            data-sketch-array-tool={array.tool}
+            data-sketch-array-selection={String(array.selectionCount)}
+            role="group"
+            title={labels.arrayHeading}
+          >
+            <div className="p-(--pad-panel)">
+              {array.selectionCount === 0 ? (
+                <p className="text-label text-ink-faint">
+                  {labels.arrayNoSelection}
+                </p>
+              ) : (
+                <>
+                  <p
+                    className="pb-(--gap-tight) font-mono text-data text-ink-dim"
+                    data-testid="sketch-array-selection"
+                  >
+                    {labels.arraySelectionLabel(array.selectionCount)}
+                  </p>
+                  {array.tool === "rectArray" ? (
+                    <rectArrayForm.Form className="space-y-2" />
+                  ) : (
+                    <circArrayForm.Form className="space-y-2" />
+                  )}
+                  {arrayFailure !== undefined ? (
+                    <div
+                      className="pt-(--gap-tight) text-label text-destructive"
+                      data-testid="sketch-array-error"
+                      role="alert"
+                    >
+                      {arrayFailure}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </PanelSection>
+        ) : null}
+        {/* The Phase 37 convert list: the host's topology references; a host
+            without a topology view gets the honest hint, not dead rows. */}
+        <PanelSection
+          aria-label={labels.convertHeading}
+          data-sketch-convert-section=""
+          role="group"
+          title={labels.convertHeading}
+        >
+          {convert === null ? (
+            <p className="p-(--pad-panel) text-label text-ink-faint">
+              {labels.convertNoTopology}
+            </p>
+          ) : convert.entries.length === 0 ? (
+            <p className="p-(--pad-panel) text-label text-ink-faint">
+              {labels.convertEmpty}
             </p>
           ) : (
             <>
-              <p
-                className="text-muted-foreground pb-1 font-mono text-xs"
-                data-testid="sketch-array-selection"
-              >
-                {labels.arraySelectionLabel(array.selectionCount)}
-              </p>
-              {array.tool === "rectArray" ? (
-                <rectArrayForm.Form className="space-y-2" />
-              ) : (
-                <circArrayForm.Form className="space-y-2" />
+              {convert.hint === undefined ? null : (
+                <p className="px-(--pad-panel) pt-(--pad-row) text-label text-ink-faint">
+                  {convert.hint}
+                </p>
               )}
-              {arrayFailure !== undefined ? (
+              <ul>
+                {convert.entries.map((entry) => (
+                  <li key={entry.referenceId}>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex h-(--row-h) w-full cursor-pointer items-center",
+                        "gap-(--gap) px-(--pad-row) text-left text-ui",
+                        "text-ink-dim transition-colors focus-instrument",
+                        "duration-(--dur-state) ease-(--ease-instrument)",
+                        "enabled:hover:bg-well enabled:hover:text-ink",
+                        "disabled:cursor-default disabled:text-ink-faint",
+                      )}
+                      data-sketch-convert-entry={entry.referenceId}
+                      data-sketch-convert-kind={entry.kind}
+                      data-sketch-convert-convertible={entry.convertible}
+                      disabled={!entry.convertible}
+                      title={
+                        entry.declineMessage ??
+                        `Convert ${entry.label} into the sketch`
+                      }
+                      onClick={() => {
+                        setConvertFailure(undefined);
+                        if (onConvert === undefined) return;
+                        const outcome = onConvert(entry.referenceId);
+                        if (!outcome.ok) {
+                          setConvertFailure(
+                            `${outcome.error.code}: ${outcome.error.message}`,
+                          );
+                        }
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono text-data">
+                        {entry.label}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {convertFailure === undefined ? null : (
                 <div
-                  className="text-destructive pt-1 text-xs leading-4"
-                  data-testid="sketch-array-error"
+                  className="px-(--pad-panel) pb-(--pad-row) text-label text-destructive"
+                  data-testid="sketch-convert-error"
                   role="alert"
                 >
-                  {arrayFailure}
+                  {convertFailure}
                 </div>
-              ) : null}
+              )}
             </>
           )}
-        </section>
-      ) : null}
-      {/* The Phase 37 convert list: the host's topology references; a host
-          without a topology view gets the honest hint, not dead rows. */}
-      <section
-        aria-label={labels.convertHeading}
-        className="border-border border-b px-2 py-2"
-        data-sketch-convert-section=""
-      >
-        <div className="text-muted-foreground pb-1 text-[10px] font-medium tracking-wider uppercase">
-          {labels.convertHeading}
-        </div>
-        {convert === null ? (
-          <p className="text-muted-foreground text-xs leading-4">
-            {labels.convertNoTopology}
-          </p>
-        ) : convert.entries.length === 0 ? (
-          <p className="text-muted-foreground text-xs leading-4">
-            {labels.convertEmpty}
-          </p>
-        ) : (
-          <>
-            {convert.hint !== undefined ? (
-              <p className="text-muted-foreground pb-1 text-xs leading-4">
-                {convert.hint}
-              </p>
-            ) : null}
-            <ul className="px-0 py-0.5">
-              {convert.entries.map((entry) => (
-                <li key={entry.referenceId}>
-                  <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center gap-2 px-1 py-0.5 text-left text-xs outline-none enabled:hover:bg-muted/60 disabled:cursor-default disabled:opacity-60 focus-visible:ring-1 focus-visible:ring-ring/50"
-                    data-sketch-convert-entry={entry.referenceId}
-                    data-sketch-convert-kind={entry.kind}
-                    data-sketch-convert-convertible={entry.convertible}
-                    disabled={!entry.convertible}
-                    title={
-                      entry.declineMessage ??
-                      `Convert ${entry.label} into the sketch`
-                    }
-                    onClick={() => {
-                      setConvertFailure(undefined);
-                      if (onConvert === undefined) return;
-                      const outcome = onConvert(entry.referenceId);
-                      if (!outcome.ok) {
-                        setConvertFailure(
-                          `${outcome.error.code}: ${outcome.error.message}`,
-                        );
-                      }
-                    }}
-                  >
-                    <span className="min-w-0 flex-1 truncate font-mono">
-                      {entry.label}
-                    </span>
-                  </button>
+        </PanelSection>
+        <PanelSection
+          aria-label={labels.diagnosticsHeading}
+          role="group"
+          title={labels.diagnosticsHeading}
+          trailing={String(diagnostics.length)}
+        >
+          {diagnostics.length === 0 ? (
+            <p className="p-(--pad-panel) text-label text-ink-faint">
+              {labels.emptyDiagnostics}
+            </p>
+          ) : (
+            <ul className="space-y-(--gap-tight) p-(--pad-panel)">
+              {diagnostics.map((diagnostic) => (
+                <li
+                  key={`${diagnostic.code}:${diagnostic.message}`}
+                  className={cn(
+                    "text-label",
+                    SEVERITY_CLASSES[diagnostic.severity],
+                  )}
+                  data-sketch-diagnostic-code={diagnostic.code}
+                  data-sketch-diagnostic-severity={diagnostic.severity}
+                >
+                  <span className="font-mono">{diagnostic.code}</span>
+                  {": "}
+                  {diagnostic.message}
                 </li>
               ))}
             </ul>
-            {convertFailure !== undefined ? (
-              <div
-                className="text-destructive pt-1 text-xs leading-4"
-                data-testid="sketch-convert-error"
-                role="alert"
-              >
-                {convertFailure}
-              </div>
-            ) : null}
-          </>
-        )}
-      </section>
-      <section aria-label={labels.diagnosticsHeading}>
-        <div className="text-muted-foreground px-2 pt-1.5 text-[10px] font-medium tracking-wider uppercase">
-          {labels.diagnosticsHeading}
-        </div>
-        {diagnostics.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-2">
-            {labels.emptyDiagnostics}
-          </div>
-        ) : (
-          <ul className="space-y-1 px-2 py-1.5">
-            {diagnostics.map((diagnostic) => (
-              <li
-                key={`${diagnostic.code}:${diagnostic.message}`}
-                className={`${SEVERITY_CLASSES[diagnostic.severity]} text-xs leading-4`}
-                data-sketch-diagnostic-code={diagnostic.code}
-                data-sketch-diagnostic-severity={diagnostic.severity}
-              >
-                <span className="font-mono">{diagnostic.code}</span>
-                {": "}
-                {diagnostic.message}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+          )}
+        </PanelSection>
+      </PanelBody>
+    </Panel>
   );
 }

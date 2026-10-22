@@ -119,7 +119,44 @@ describe("CadSketchToolbar", () => {
         labels={{ tools: {} }}
       />,
     );
-    expect(screen.getByText("mystery")).toBeDefined();
+    // Icon-only: the identifier is the accessible NAME, not button text —
+    // an unknown id still gets the fallback mark, never a blank button.
+    expect(toolButton("mystery").getAttribute("aria-label")).toBe("mystery");
+    expect(toolButton("mystery").querySelector("svg")).not.toBeNull();
     expect(CAD_SKETCH_TOOLBAR_LABELS.tools.line?.label).toBe("Line");
+  });
+
+  it("carries each tool's name as aria-label, never as button text", () => {
+    renderToolbar();
+    expect(toolButton("line").getAttribute("aria-label")).toBe("Line");
+    expect(toolButton("line").textContent).not.toContain("Line");
+    expect(toolButton("line").getAttribute("title")).toBe(
+      CAD_SKETCH_TOOLBAR_LABELS.tools.line?.tooltip,
+    );
+  });
+
+  it("folds a family into one slot, keeping every member's handle", () => {
+    renderToolbar();
+    // horizontal + vertical are one orientation family: the face carries
+    // the first member's handle, and the family's chevron is one control.
+    expect(toolButton("horizontal")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Orientation family" }),
+    ).toBeDefined();
+    // The faced member runs on a direct press — a face is a real control.
+    expect(document.querySelectorAll("[data-sketch-tool-id]").length).toBe(
+      // 6 lone tools in the first group + 2 family faces (orientation,
+      // dimension) — the closed menus contribute nothing.
+      8,
+    );
+  });
+
+  it("faces the armed member of a family, pressed", () => {
+    renderToolbar({ activeToolId: "vertical" });
+    const faced = toolButton("vertical");
+    expect(faced.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector('[data-sketch-tool-id="horizontal"]')).toBe(
+      null,
+    );
   });
 });

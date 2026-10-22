@@ -29,6 +29,7 @@ import {
   length,
   type ParameterCollection,
 } from "@slopcad/cad-core";
+import { cadSketchToolFamilyOf } from "@slopcad/ui/components/cad/cad-tool-icons";
 
 import { SketchMode } from "./SketchMode";
 
@@ -74,10 +75,32 @@ function mount(boardLMm: number) {
     if (element === null) throw new Error("the sketch root must be mounted");
     return element;
   };
+  /**
+   * The control that arms `toolId`. The strip folds its constraint and
+   * dimension kinds into `ToolFlyout` families, so a member that is not
+   * the family's current FACE lives in the family's menu: open the family
+   * first, then take the member. Every control keeps its
+   * `data-sketch-tool-id` handle either way.
+   */
   const toolButton = (toolId: string): Element => {
-    const button = document.querySelector(`[data-sketch-tool-id="${toolId}"]`);
-    if (button === null) throw new Error(`tool button ${toolId} missing`);
-    return button;
+    const direct = document.querySelector(`[data-sketch-tool-id="${toolId}"]`);
+    if (direct !== null) return direct;
+    const family = cadSketchToolFamilyOf(toolId);
+    if (family === undefined) {
+      throw new Error(`tool button ${toolId} missing`);
+    }
+    const trigger = document.querySelector(
+      `[data-testid="sketch-family-${family.id}"]`,
+    );
+    if (trigger === null) {
+      throw new Error(`tool family ${family.id} missing`);
+    }
+    fireEvent.click(trigger);
+    const member = document.querySelector(
+      `[role="menuitem"][data-sketch-tool-id="${toolId}"]`,
+    );
+    if (member === null) throw new Error(`tool button ${toolId} missing`);
+    return member;
   };
   return { root, toolButton, view };
 }

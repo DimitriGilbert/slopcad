@@ -394,11 +394,12 @@ describe("CadSketchCanvas Phase 37 — drag, ink, dimensions", () => {
       point: { x: 25, y: 0 },
     });
     expect(onDragMove).toHaveBeenCalledWith({ x: 25, y: 25 });
-    // The dragged entity renders with the violet drag ink mid-drag.
+    // The dragged entity renders with the drag ink mid-drag: the domain's
+    // selection signal (it is the entity being manipulated).
     const dragged = view.container.querySelector(
       '[data-sketch-entity-id="skent_a"]',
     );
-    expect(dragged?.getAttribute("stroke")).toMatch(/violet|#8b5cf6/);
+    expect(dragged?.getAttribute("stroke")).toBe("var(--viewport-select)");
     // Release ends the drag with the release point.
     firePointer(svg, "pointerup", 200, 100);
     expect(onDragEnd).toHaveBeenCalledWith({ x: 25, y: 25 });
@@ -429,7 +430,8 @@ describe("CadSketchCanvas Phase 37 — drag, ink, dimensions", () => {
       '[data-sketch-entity-id="skent_a"]',
     );
     // dof > 0 → the blue ink of the under-constrained convention.
-    expect(line?.getAttribute("stroke")).toMatch(/sky-600|#0284c7/);
+    // Under-constrained still reads BLUE — the system's own parked blue.
+    expect(line?.getAttribute("stroke")).toBe("var(--status-parked)");
     const point = view.container.querySelector(
       '[data-sketch-entity-id="skent_c"]',
     );
@@ -439,8 +441,8 @@ describe("CadSketchCanvas Phase 37 — drag, ink, dimensions", () => {
     const circle = view.container.querySelector(
       '[data-sketch-entity-id="skent_b"]',
     );
-    // Absent from the map → legacy styling (warning amber wins here).
-    expect(circle?.getAttribute("stroke")).toMatch(/amber|#f59e0b/);
+    // Absent from the map → the diagnostic wins: the system's warn ink.
+    expect(circle?.getAttribute("stroke")).toBe("var(--signal)");
   });
 
   it("renders the dimension overlay with per-dimension machine ids", () => {
@@ -472,11 +474,10 @@ describe("CadSketchCanvas Phase 37 — drag, ink, dimensions", () => {
 });
 
 describe("CadSketchCanvas grid guards", () => {
-  /** Minor grid lines carry the border ink; the axes are the only 1.25s. */
+  /** Minor grid lines carry the viewport rule; the axes are the only 1.25s. */
   function gridLineCount(container: HTMLElement): number {
-    return container.querySelectorAll(
-      'line[stroke="var(--color-border, #e4e4e7)"]',
-    ).length;
+    return container.querySelectorAll('line[stroke="var(--viewport-rule)"]')
+      .length;
   }
 
   function axisLineCount(container: HTMLElement): number {

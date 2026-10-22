@@ -1,53 +1,80 @@
 /**
- * `CadSketchToolbar` (Phase 25): the shadcn-side sketch tool strip — labeled
- * clusters of tool buttons (drawing tools, then constraint tools) driving a
- * host-owned sketch editor through one activation callback. Pure display and
- * event passthrough, built on the existing `Button` primitive — no new
- * primitives, no tool state of its own: the active tool is a prop
- * (`activeToolId`), activation is a prop (`onActivate`), and a tool id
- * missing from the labels map falls back to the raw id — an identifier, not
+ * `CadSketchToolbar` — the SKETCH mode's tool strip, in the cockpit's one
+ * tool dialect.
+ *
+ * ## What this replaces
+ *
+ * Thirty-six text-label `Button`s in `border-border bg-background` rows
+ * that WRAPPED: three clusters of words, each word ~70–110px, stacked two
+ * and three lines deep inside the sketch command row. It was the loudest
+ * remaining surface in the product and the reason the redesign pass
+ * exists — a sketch editor whose toolbar read as a paragraph of verbs
+ * while the model mode's strip had already become marks.
+ *
+ * It is now icon-first, on the cockpit primitives: `ToolGroup` clusters of
+ * icon-only `ToolButton`s, and `ToolFlyout` for the FAMILIES — the
+ * coincidence, orientation and relation constraint kinds, the dimension
+ * kinds, the arrays and the entity transforms. There is NO visible tool
+ * label anywhere in this file: the `aria-label` carries the name the text
+ * printed, the `title` carries what the tool does, and the key cap carries
+ * the shortcut. Nothing is hidden by viewport width — a family is one slot
+ * at every width.
+ *
+ * ## The contract this keeps, exactly
+ *
+ * `groups` is still host DATA (ordered clusters of tool ids), the active
+ * tool is still a prop, activation is still the single `onActivate` path,
+ * `disabledToolIds` still renders a tool inert, and `labels` still
+ * overrides every string. The container is still ONE named
+ * `role="group"` ("Sketch tools" by default) — a cluster of a strip, not
+ * a second nested `role="toolbar"`.
+ *
+ * Every tool keeps `data-sketch-tool-id` — on a lone button, on a
+ * family's face, and on each member inside a family's menu (see
+ * `ToolFlyout`'s `itemAttribute`), so the machine handle survives the
+ * fold. A tool id the icon record has never heard of renders with the
+ * fallback mark and the raw id as its accessible name: an identifier, not
  * prose, and the documented extension point for custom tools.
- *
- * ## Layout
- *
- * One dense strip of labeled clusters: each group renders a quiet uppercase
- * micro-label and its buttons behind a shared divider, so a sketch toolbar's
- * two vocabularies (drawing vs. constraining) read as two vocabularies
- * instead of one undifferentiated row. `groups` is data: a host can render
- * one cluster or many, in any order.
  *
  * ## Keyboard
  *
- * The shortcut row is positional and documented: the first ten tools across
- * all groups sit on the digit keys `1`–`9` and `0`, and the next ten on the
- * letters `q w e r t y u i o p` (Phase 37's added entity-op tools included).
- * Tools beyond the twentieth get no shortcut — the buttons themselves remain
- * tab-reachable. All shortcuts are handled on the strip container so they
- * work from any focus inside it — the same single `activate` path a click
- * takes; keyboard activation is never a parallel mechanism. Modified digit
- * or letter presses (ctrl/meta/alt) are ignored, and Enter/Space activate
- * the focused button natively. Each button shows its key as a small key cap
- * (aria-hidden — the accessible name is the tool label).
+ * The shortcut row is positional and unchanged: the first ten tools
+ * across all groups sit on `1`–`9`,`0`, the next ten on `q w e r t y u i
+ * o p`, counted over the FLAT order of `groups` — folding tools into
+ * families changes not one assignment, because the fold is a rendering
+ * decision and the order is the host's. Shortcuts are handled on the
+ * strip container so they work from any focus inside it, through the same
+ * single `activate` path a click takes. Modified presses (ctrl/meta/alt)
+ * are ignored; Enter/Space activate the focused control natively.
  *
- * ## Disabled discipline
+ * ## Arming a family member
  *
- * `disabledToolIds` renders a button disabled — an inert tool never pretends
- * to activate (the toolbar's documented inert discipline). The strip itself
- * is inert (buttons disabled) when mounted with no `onActivate`: it never
- * pretends to activate anything.
+ * A family's face FOLLOWS the armed tool: arm `radius` from the dimension
+ * menu and the dimension slot shows the radius mark, pressed. That is why
+ * `aria-pressed` is still true for exactly the armed tool, and why the
+ * armed tool is always visible on the strip without opening anything.
  *
  * All user-facing strings live in {@link CAD_SKETCH_TOOLBAR_LABELS}
  * (overridable via the `labels` prop).
  */
 
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import { cn } from "cn";
+import type { ToolFlyoutItem } from "../cockpit/tool-flyout";
 
-import { Button } from "../button";
+import { KeyCap, ToolButton, ToolGroup } from "../cockpit/tool-button";
+import { ToolFlyout } from "../cockpit/tool-flyout";
+import {
+  CAD_SKETCH_TOOL_ICONS,
+  CAD_TOOL_ICON_FALLBACK,
+  cadSketchToolFamilyOf,
+  isCadSketchToolId,
+  type CadSketchToolFamily,
+} from "./cad-tool-icons";
 
 /** The user-facing strings of one tool's button. */
 export interface CadSketchToolLabels {
-  /** The button's visible text and accessible name. */
+  /** The tool's accessible name (the string the button used to print). */
   readonly label: string;
   /** The button's `title` — what activating the tool does. */
   readonly tooltip: string;
@@ -57,7 +84,7 @@ export interface CadSketchToolLabels {
 export interface CadSketchToolbarGroup {
   /** Stable group id (`data-sketch-group-id`). */
   readonly id: string;
-  /** The cluster's micro-label (e.g. "Tools", "Constraints"). */
+  /** The cluster's name (e.g. "Draw", "Constrain") — its accessible name. */
   readonly label: string;
   /** The tool ids in the cluster, in render and shortcut order. */
   readonly toolIds: readonly string[];
@@ -72,9 +99,9 @@ export interface CadSketchToolbarLabels {
 }
 
 /**
- * Documented label defaults for the Phase 25 sketch tool set; every
- * render-output string lives here. Constraint tools carry the constraint
- * kind's name — the same vocabulary the sketch domain uses.
+ * Documented label defaults for the sketch tool set; every render-output
+ * string lives here. Constraint tools carry the constraint kind's name —
+ * the same vocabulary the sketch domain uses.
  */
 export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
   toolbarLabel: "Sketch tools",
@@ -233,7 +260,7 @@ export interface CadSketchToolbarProps {
   /** The active tool id, or `null` for none. */
   readonly activeToolId: string | null;
   /**
-   * The activation surface. Without it the strip is inert: every button
+   * The activation surface. Without it the strip is inert: every control
    * renders disabled.
    */
   readonly onActivate?: (toolId: string) => void;
@@ -285,8 +312,63 @@ function shortcutToolId(
 }
 
 /**
- * The sketch tool strip: labeled clusters of activation buttons, the active
- * tool pressed, digit-key activation, per-tool descriptions.
+ * One cluster slot: either a lone tool, or a family rendered once at the
+ * position of its first member in that cluster. A family present in two
+ * clusters (a host's choice) renders once in each, with that cluster's
+ * members only — the fold never moves a tool between clusters.
+ */
+type ClusterSlot =
+  | { readonly kind: "tool"; readonly toolId: string }
+  | {
+      readonly kind: "family";
+      readonly family: CadSketchToolFamily;
+      readonly toolIds: readonly string[];
+    };
+
+/** The cluster's slots, in render order (the host's tool order). */
+export function sketchClusterSlots(
+  toolIds: readonly string[],
+): readonly ClusterSlot[] {
+  const slots: ClusterSlot[] = [];
+  const familyIndexById = new Map<string, number>();
+  for (const toolId of toolIds) {
+    const family = cadSketchToolFamilyOf(toolId);
+    if (family === undefined) {
+      slots.push({ kind: "tool", toolId });
+      continue;
+    }
+    const existing = familyIndexById.get(family.id);
+    if (existing === undefined) {
+      familyIndexById.set(family.id, slots.length);
+      slots.push({ family, kind: "family", toolIds: [toolId] });
+      continue;
+    }
+    const slot = slots[existing];
+    if (slot === undefined || slot.kind !== "family") continue;
+    slots[existing] = {
+      family: slot.family,
+      kind: "family",
+      toolIds: [...slot.toolIds, toolId],
+    };
+  }
+  // A family's members render in the FAMILY's documented menu order, not
+  // in the order the host happened to list them.
+  return slots.map((slot) =>
+    slot.kind === "tool"
+      ? slot
+      : {
+          family: slot.family,
+          kind: "family",
+          toolIds: slot.family.memberIds.filter((member) =>
+            slot.toolIds.includes(member),
+          ),
+        },
+  );
+}
+
+/**
+ * The sketch tool strip: icon clusters of activation controls, families
+ * behind flyouts, the active tool pressed, positional key activation.
  */
 export function CadSketchToolbar({
   activeToolId,
@@ -295,7 +377,7 @@ export function CadSketchToolbar({
   groups,
   labels: labelOverrides,
   onActivate,
-}: CadSketchToolbarProps) {
+}: CadSketchToolbarProps): ReactElement {
   const labels: CadSketchToolbarLabels = {
     ...CAD_SKETCH_TOOLBAR_LABELS,
     ...labelOverrides,
@@ -313,73 +395,114 @@ export function CadSketchToolbar({
     onActivate(toolId);
   };
 
+  /** Everything one tool renders with, whatever slot shape hosts it. */
+  const describe = (
+    toolId: string,
+  ): {
+    readonly label: string;
+    readonly tooltip: string;
+    readonly icon: ToolFlyoutItem["icon"];
+    readonly shortcut: string | null;
+    readonly inert: boolean;
+  } => {
+    const toolLabels = labels.tools[toolId] ?? {
+      label: toolId,
+      tooltip: toolId,
+    };
+    return {
+      icon: isCadSketchToolId(toolId)
+        ? CAD_SKETCH_TOOL_ICONS[toolId].icon
+        : CAD_TOOL_ICON_FALLBACK,
+      inert: onActivate === undefined || disabled.has(toolId),
+      label: toolLabels.label,
+      shortcut: shortcutForIndex(flatToolIds.indexOf(toolId)),
+      tooltip: toolLabels.tooltip,
+    };
+  };
+
+  const activate = (toolId: string): void => {
+    onActivate?.(toolId);
+  };
+
   return (
     <div
       aria-label={labels.toolbarLabel}
-      className={cn(
-        "border-border bg-background flex items-stretch gap-3 border p-1",
-        className,
-      )}
+      className={cn("flex min-w-0 items-center gap-(--gap)", className)}
       data-slot="cad-sketch-toolbar"
       onKeyDown={handleKeyDown}
       role="group"
     >
-      {groups.map((group, groupIndex) => (
-        <div
-          key={group.id}
-          aria-label={group.label}
-          className={cn(
-            "flex flex-col gap-0.5",
-            groupIndex > 0 && "border-border border-l pl-3",
-          )}
+      {groups.map((group) => (
+        <ToolGroup
           data-sketch-group-id={group.id}
-          role="group"
+          key={group.id}
+          label={group.label}
         >
-          <span className="text-muted-foreground px-1 text-[10px] font-medium tracking-wider uppercase">
-            {group.label}
-          </span>
-          <div className="flex flex-wrap items-center gap-1">
-            {group.toolIds.map((toolId) => {
-              const globalIndex = flatToolIds.indexOf(toolId);
-              const active = toolId === activeToolId;
-              const toolLabels = labels.tools[toolId] ?? {
-                label: toolId,
-                tooltip: toolId,
-              };
-              const shortcut = shortcutForIndex(globalIndex);
+          {sketchClusterSlots(group.toolIds).map((slot) => {
+            if (slot.kind === "tool") {
+              const tool = describe(slot.toolId);
+              const active = slot.toolId === activeToolId;
               return (
-                <Button
-                  key={toolId}
-                  aria-keyshortcuts={shortcut ?? undefined}
+                <ToolButton
+                  aria-keyshortcuts={tool.shortcut ?? undefined}
+                  aria-label={tool.label}
                   aria-pressed={active}
                   data-active={active || undefined}
-                  data-sketch-tool-id={toolId}
-                  disabled={onActivate === undefined || disabled.has(toolId)}
-                  onClick={
-                    onActivate === undefined
-                      ? undefined
-                      : () => {
-                          onActivate(toolId);
-                        }
-                  }
-                  size="xs"
-                  title={toolLabels.tooltip}
-                  variant={active ? "default" : "outline"}
+                  data-sketch-tool-id={slot.toolId}
+                  disabled={tool.inert}
+                  key={slot.toolId}
+                  onClick={() => {
+                    activate(slot.toolId);
+                  }}
+                  size="icon"
+                  title={tool.tooltip}
                 >
-                  {toolLabels.label}
-                  {shortcut !== null ? (
-                    <kbd
-                      aria-hidden="true"
-                      className="border-current/40 ml-1 border px-1 font-mono text-[10px] leading-3 font-normal"
-                    >
-                      {shortcut}
-                    </kbd>
-                  ) : null}
-                </Button>
+                  <tool.icon aria-hidden="true" />
+                  {/* The binding, as a corner hint. The cap keeps its
+                      primitive (and its aria-hidden contract — the
+                      control publishes `aria-keyshortcuts`) but drops the
+                      cap CHROME here: a bordered key cap beside a 28px
+                      mark would be wider than the mark it annotates. */}
+                  {tool.shortcut === null ? null : (
+                    <KeyCap className="absolute right-0 bottom-0 h-auto min-w-0 rounded-none border-0 bg-transparent px-[2px] leading-none">
+                      {tool.shortcut}
+                    </KeyCap>
+                  )}
+                </ToolButton>
               );
-            })}
-          </div>
-        </div>
+            }
+            const items = slot.toolIds.map((toolId): ToolFlyoutItem => {
+              const tool = describe(toolId);
+              return {
+                description: tool.tooltip,
+                disabled: tool.inert,
+                icon: tool.icon,
+                id: toolId,
+                label: tool.label,
+                onSelect: () => {
+                  activate(toolId);
+                },
+                shortcut: tool.shortcut ?? undefined,
+              };
+            });
+            // The face follows the ARMED tool, so the strip always shows
+            // what is live without the operator opening the family.
+            const armedHere = slot.toolIds.find(
+              (toolId) => toolId === activeToolId,
+            );
+            return (
+              <ToolFlyout
+                facedId={armedHere}
+                itemAttribute="data-sketch-tool-id"
+                items={items}
+                key={slot.family.id}
+                label={slot.family.label}
+                pressedId={activeToolId}
+                triggerTestId={`sketch-family-${slot.family.id}`}
+              />
+            );
+          })}
+        </ToolGroup>
       ))}
     </div>
   );
