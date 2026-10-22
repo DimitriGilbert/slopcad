@@ -5045,10 +5045,10 @@ test("s29 stored parameter expressions: the panel commits the expression, re-dri
       // stored expression (volumeHint 8 + 6 → 10 + 6 = 16) and re-settles
       // the boot plate at the new bore (the dispatch effect follows the
       // document identity, and the plate scene consumes the stored hole
-      // diameter). The literal edit is a value-only commit, so boreRadius's
-      // displayed line keeps reading volumeHint's cache (14 / 2 = 7) — the
-      // domain's documented caching rule; the next expression commit
-      // re-derives it.
+      // diameter). The literal edit commits through the clear form, which
+      // re-derives the expression-driven dependents in the same application
+      // (the panel's documented apply rule) — boreRadius's displayed line
+      // follows volumeHint's fresh cache (16 / 2 = 8).
       const before = await dispatchedCount(page, COMPLETE_ROOT);
       await page.getByLabel("holeDiameter", { exact: true }).fill("10");
       await apply.click();
@@ -5058,7 +5058,7 @@ test("s29 stored parameter expressions: the panel commits the expression, re-dri
         }),
       );
       await expect(panel.getByText("= 16 mm", { exact: true })).toBeVisible();
-      await expect(panel.getByText("= 7 mm", { exact: true })).toBeVisible();
+      await expect(panel.getByText("= 8 mm", { exact: true })).toBeVisible();
       expect(volumeNear(redriven, 30 * 20 * 10 - Math.PI * 25 * 10)).toBe(true);
       extra("parameter-expression-commit");
     },
