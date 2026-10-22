@@ -69,7 +69,10 @@ function RootDocument() {
           <Header />
           <Outlet />
         </div>
-        <Toaster richColors />
+        {/* No `richColors`: a toast keeps the overlay surface and says
+            what happened in words plus a semantic icon (see
+            `packages/ui/src/components/sonner.tsx`). */}
+        <Toaster />
         <TanStackRouterDevtools position="bottom-left" />
         <ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
         <Scripts />

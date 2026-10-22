@@ -58,8 +58,10 @@ export default function SignInForm({
 
   return (
     <div className="w-full max-w-sm">
-      <h1 className="text-xl font-semibold tracking-tight">Welcome back</h1>
-      <p className="text-muted-foreground mt-1 mb-5 text-xs">
+      <h1 className="font-display text-title font-semibold tracking-tight text-ink">
+        Welcome back
+      </h1>
+      <p className="mt-1 mb-(--gap-group) text-ui text-ink-dim">
         Sign in to reach your projects and saved documents.
       </p>
 
@@ -69,12 +71,12 @@ export default function SignInForm({
           e.stopPropagation();
           void form.handleSubmit();
         }}
-        className="space-y-4"
+        className="flex flex-col gap-(--gap-group)"
       >
         <div>
           <form.Field name="email">
             {(field) => (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-1">
                 <Label htmlFor={field.name}>Email</Label>
                 <Input
                   id={field.name}
@@ -85,7 +87,7 @@ export default function SignInForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-destructive text-xs">
+                  <p key={error?.message} className="text-ui text-destructive">
                     {error?.message}
                   </p>
                 ))}
@@ -97,7 +99,7 @@ export default function SignInForm({
         <div>
           <form.Field name="password">
             {(field) => (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-1">
                 <Label htmlFor={field.name}>Password</Label>
                 <Input
                   id={field.name}
@@ -108,7 +110,7 @@ export default function SignInForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-destructive text-xs">
+                  <p key={error?.message} className="text-ui text-destructive">
                     {error?.message}
                   </p>
                 ))}
@@ -135,8 +137,13 @@ export default function SignInForm({
         </form.Subscribe>
       </form>
 
-      <div className="mt-4 text-center">
-        <Button variant="link" onClick={onSwitchToSignUp} className="text-xs">
+      <div className="mt-(--gap-group) text-center">
+        <Button
+          className="text-ui text-ink-dim underline-offset-4 hover:text-ink"
+          onClick={onSwitchToSignUp}
+          variant="ghost"
+          size="sm"
+        >
           Need an account? Sign Up
         </Button>
       </div>

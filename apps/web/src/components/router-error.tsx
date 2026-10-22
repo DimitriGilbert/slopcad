@@ -16,11 +16,9 @@ export default function RouterErrorScreen({
   reset,
 }: ErrorComponentProps): ReactElement {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-      <p className="text-sm font-medium text-foreground">
-        Something went wrong.
-      </p>
-      <p className="max-w-md text-xs text-muted-foreground">
+    <div className="flex h-full flex-col items-center justify-center gap-2 bg-chrome p-8 text-center">
+      <p className="text-title font-medium text-ink">Something went wrong.</p>
+      <p className="max-w-md text-ui text-ink-dim">
         {error instanceof Error && error.message.length > 0
           ? error.message
           : "An unexpected error interrupted this view."}

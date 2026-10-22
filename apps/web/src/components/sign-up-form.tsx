@@ -61,8 +61,10 @@ export default function SignUpForm({
 
   return (
     <div className="w-full max-w-sm">
-      <h1 className="text-xl font-semibold tracking-tight">Create account</h1>
-      <p className="text-muted-foreground mt-1 mb-5 text-xs">
+      <h1 className="font-display text-title font-semibold tracking-tight text-ink">
+        Create account
+      </h1>
+      <p className="mt-1 mb-(--gap-group) text-ui text-ink-dim">
         One account keeps your projects, documents, and edit history.
       </p>
 
@@ -72,12 +74,12 @@ export default function SignUpForm({
           e.stopPropagation();
           void form.handleSubmit();
         }}
-        className="space-y-4"
+        className="flex flex-col gap-(--gap-group)"
       >
         <div>
           <form.Field name="name">
             {(field) => (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-1">
                 <Label htmlFor={field.name}>Name</Label>
                 <Input
                   id={field.name}
@@ -87,7 +89,7 @@ export default function SignUpForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-destructive text-xs">
+                  <p key={error?.message} className="text-ui text-destructive">
                     {error?.message}
                   </p>
                 ))}
@@ -99,7 +101,7 @@ export default function SignUpForm({
         <div>
           <form.Field name="email">
             {(field) => (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-1">
                 <Label htmlFor={field.name}>Email</Label>
                 <Input
                   id={field.name}
@@ -110,7 +112,7 @@ export default function SignUpForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-destructive text-xs">
+                  <p key={error?.message} className="text-ui text-destructive">
                     {error?.message}
                   </p>
                 ))}
@@ -122,7 +124,7 @@ export default function SignUpForm({
         <div>
           <form.Field name="password">
             {(field) => (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-1">
                 <Label htmlFor={field.name}>Password</Label>
                 <Input
                   id={field.name}
@@ -133,7 +135,7 @@ export default function SignUpForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-destructive text-xs">
+                  <p key={error?.message} className="text-ui text-destructive">
                     {error?.message}
                   </p>
                 ))}
@@ -160,8 +162,13 @@ export default function SignUpForm({
         </form.Subscribe>
       </form>
 
-      <div className="mt-4 text-center">
-        <Button variant="link" onClick={onSwitchToSignIn} className="text-xs">
+      <div className="mt-(--gap-group) text-center">
+        <Button
+          className="text-ui text-ink-dim underline-offset-4 hover:text-ink"
+          onClick={onSwitchToSignIn}
+          variant="ghost"
+          size="sm"
+        >
           Already have an account? Sign In
         </Button>
       </div>

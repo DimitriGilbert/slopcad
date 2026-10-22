@@ -8,25 +8,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { Box, ChevronLeft } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
-import { Badge } from "@slopcad/ui/components/badge";
 import { buttonVariants } from "@slopcad/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@slopcad/ui/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@slopcad/ui/components/empty";
+import { Panel, PanelHeader } from "@slopcad/ui/components/cockpit/panel";
 import { Skeleton } from "@slopcad/ui/components/skeleton";
 
 import {
@@ -81,15 +67,16 @@ function ProjectDetailPage(): ReactElement {
     return (
       <AppPage>
         <BackLink />
-        <div aria-hidden="true" className="mt-6">
-          <Skeleton className="h-9 w-72 max-w-full" />
-          <Skeleton className="mt-3 h-5 w-96 max-w-full" />
-          <div className="mt-10 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="space-y-3">
-              <Skeleton className="h-20" />
-              <Skeleton className="h-20" />
+        <div aria-hidden="true" className="mt-(--gap-group)">
+          <Skeleton className="h-8 w-72 max-w-full" />
+          <Skeleton className="mt-2 h-5 w-96 max-w-full" />
+          <div className="mt-(--gap-group) grid items-start gap-(--gap-group) lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="flex flex-col gap-px">
+              <Skeleton className="h-(--header-h) w-full" />
+              <Skeleton className="h-(--row-h-lg) w-full" />
+              <Skeleton className="h-(--row-h-lg) w-full" />
             </div>
-            <Skeleton className="h-40" />
+            <Skeleton className="h-36" />
           </div>
         </div>
       </AppPage>
@@ -100,7 +87,7 @@ function ProjectDetailPage(): ReactElement {
     return (
       <AppPage>
         <BackLink />
-        <p className="text-destructive mt-8 text-sm" role="alert">
+        <p className="mt-(--gap-group) text-ui text-destructive" role="alert">
           {projectQuery.error.message}
         </p>
       </AppPage>
@@ -113,7 +100,7 @@ function ProjectDetailPage(): ReactElement {
   return (
     <AppPage>
       <BackLink />
-      <div className="mt-6">
+      <div className="mt-(--gap-group)">
         <PageHeader
           lead={
             project.description !== null && project.description !== ""
@@ -124,70 +111,67 @@ function ProjectDetailPage(): ReactElement {
           title={project.name}
         />
       </div>
-      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <aside className="lg:order-2 lg:sticky lg:top-16">
-          <Card data-testid="create-document-panel">
-            <CardHeader>
-              <CardTitle>New document</CardTitle>
-              <CardDescription>
+      <div className="grid items-start gap-(--gap-group) lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <aside className="lg:order-2 lg:sticky lg:top-(--gap-group)">
+          <Panel data-testid="create-document-panel">
+            <PanelHeader title="New document" titleAs="h2" />
+            <div className="p-(--pad-panel)">
+              <p className="mb-(--gap) text-ui text-ink-dim">
                 One document holds one model and its saved versions.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+              </p>
               <CreateDocumentForm onSubmitted={handleCreateDocument} />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         </aside>
-        <section aria-label="Documents" className="lg:order-1">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-medium">Documents</h2>
-            {documentsQuery.isPending ? null : (
-              <span className="text-muted-foreground font-mono text-xs">
-                {plural(documents.length, "document")}
-              </span>
-            )}
-          </div>
+        <Panel aria-label="Documents" className="lg:order-1">
+          {/* Furniture, not document structure — the page's one heading
+              is the project's name (see the projects index for why a
+              second same-named heading is a hazard). */}
+          <PanelHeader
+            title="Documents"
+            trailing={documentsQuery.isPending ? "…" : String(documents.length)}
+          />
           {documentsQuery.isPending ? (
-            <div aria-hidden="true" className="space-y-3">
-              <Skeleton className="h-20" />
-              <Skeleton className="h-20" />
+            <div aria-hidden="true" className="flex flex-col gap-px">
+              <Skeleton className="h-(--row-h-lg) w-full" />
+              <Skeleton className="h-(--row-h-lg) w-full" />
             </div>
           ) : documentsQuery.isError ? (
-            <p className="text-destructive text-sm" role="alert">
+            <p
+              className="p-(--pad-panel) text-ui text-destructive"
+              role="alert"
+            >
               Documents could not be loaded: {documentsQuery.error.message}
             </p>
           ) : documents.length === 0 ? (
-            <Empty className="border">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Box />
-                </EmptyMedia>
-                <EmptyTitle>No documents yet</EmptyTitle>
-                <EmptyDescription>
-                  Create one in the New document panel; it opens in the
-                  workbench unsaved at v0.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
+            <div className="p-(--gap-group)">
+              <p className="text-title text-ink">No documents yet</p>
+              <p className="mt-1 max-w-[72ch] text-body text-ink-dim">
+                Create one in the New document panel; it opens in the workbench
+                unsaved at v0.
+              </p>
+            </div>
           ) : (
-            <ul className="space-y-3" data-testid="document-list">
+            <ul data-testid="document-list">
               {documents.map((document) => (
                 <li
-                  className="border-border bg-card flex items-center gap-4 border p-4"
+                  className="grid min-h-(--row-h-lg) grid-cols-[minmax(0,1fr)_auto] items-center gap-(--gap-group) border-b border-rule/60 px-(--pad-panel) py-1.5 transition-colors duration-(--dur-state) last:border-b-0 hover:bg-well"
                   key={document.id}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2.5">
-                      <span className="truncate text-sm font-medium">
+                  <div className="flex min-w-0 flex-col">
+                    <div className="flex items-baseline gap-2">
+                      <span className="truncate text-ui font-medium text-ink">
                         {document.name}
                       </span>
                       {document.versionCount > 0 ? (
-                        <Badge variant="outline">
+                        /* The saved version is a measured fact, so it
+                           reads as one: a mono tag, not a pill badge. */
+                        <span className="shrink-0 rounded-[2px] border border-rule bg-well-deep px-1 font-mono text-micro text-ink-dim tabular">
                           {`v${String(document.latestVersion)}`}
-                        </Badge>
+                        </span>
                       ) : null}
                     </div>
-                    <div className="text-muted-foreground mt-1.5 font-mono text-[11px]">
+                    <div className="font-mono text-micro text-ink-faint tabular">
                       {document.versionCount === 0
                         ? "never saved"
                         : plural(document.versionCount, "save")}
@@ -197,7 +181,7 @@ function ProjectDetailPage(): ReactElement {
                   </div>
                   <Link
                     className={buttonVariants({
-                      size: "sm",
+                      size: "xs",
                       variant: "outline",
                     })}
                     params={{ documentId: document.id }}
@@ -209,7 +193,7 @@ function ProjectDetailPage(): ReactElement {
               ))}
             </ul>
           )}
-        </section>
+        </Panel>
       </div>
     </AppPage>
   );
@@ -218,7 +202,7 @@ function ProjectDetailPage(): ReactElement {
 function BackLink(): ReactElement {
   return (
     <Link
-      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
+      className="inline-flex items-center gap-1 text-ui text-ink-dim transition-colors duration-(--dur-state) hover:text-ink focus-instrument"
       to="/projects"
     >
       <ChevronLeft className="size-3" />

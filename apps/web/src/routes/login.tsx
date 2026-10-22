@@ -7,7 +7,9 @@
 
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { Panel } from "@slopcad/ui/components/cockpit/panel";
 
+import { PlateMark } from "@/components/header";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 
@@ -26,30 +28,27 @@ function RouteComponent() {
   const [showSignIn, setShowSignIn] = useState(false);
 
   return (
-    <div className="bg-background/30 flex h-full items-center justify-center overflow-y-auto px-4 py-10">
+    <div className="flex h-full items-center justify-center overflow-y-auto bg-chrome px-4 py-10">
       <div className="flex w-full max-w-sm flex-col items-center">
         <Link
-          className="mb-6 flex items-center gap-2.5"
+          className="mb-(--gap-group) flex items-center gap-2 focus-instrument"
           title="slopcad home"
           to="/"
         >
-          <span
-            aria-hidden="true"
-            className="border-primary/70 bg-primary/15 relative size-4 rounded-[4px] border"
-          >
-            <span className="border-primary absolute -top-1 -left-1 size-2 rounded-[2px] border" />
-          </span>
-          <span className="text-foreground font-mono text-sm font-semibold tracking-tight">
+          <PlateMark className="size-4 rounded-[4px]" />
+          <span className="font-display text-title font-semibold text-ink">
             slopcad
           </span>
         </Link>
-        <div className="border-border bg-card/60 w-full rounded-lg border p-6 shadow-[0_1px_2px_color-mix(in_oklch,var(--foreground)_10%,transparent)]">
+        {/* The auth card is the one thing on the page, so it is an
+            overlay rung — the only rung that carries a shadow. */}
+        <Panel elevation="overlay" className="w-full p-(--gap-group)">
           {showSignIn ? (
             <SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
           ) : (
             <SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
           )}
-        </div>
+        </Panel>
       </div>
     </div>
   );

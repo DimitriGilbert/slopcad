@@ -75,7 +75,10 @@ export function CreateProjectForm({
     },
     resetOnSubmitSuccess: true,
     submitLabel,
-    submitButtonClassName: "w-full",
+    // Not `w-full`: this is the surface's ONE accent-carrying action
+    // (the design system's accent rule), and a full-width amber slab
+    // turns a confirm into a banner. A control, sized to its words.
+    submitButtonClassName: "w-auto",
   });
   return <form.Form aria-label="Create project" className="space-y-3" />;
 }
@@ -123,7 +126,10 @@ export function CreateDocumentForm({
     },
     resetOnSubmitSuccess: true,
     submitLabel,
-    submitButtonClassName: "w-full",
+    // Not `w-full`: this is the surface's ONE accent-carrying action
+    // (the design system's accent rule), and a full-width amber slab
+    // turns a confirm into a banner. A control, sized to its words.
+    submitButtonClassName: "w-auto",
   });
   return <form.Form aria-label="Create document" className="space-y-3" />;
 }

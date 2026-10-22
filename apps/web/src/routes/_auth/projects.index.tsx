@@ -1,30 +1,16 @@
 /**
- * The projects index: the workspace's shelf. Two-region layout on wide
- * screens — the project cards on the left, the create panel pinned
- * beside them; stacked on small screens with the panel first, where the
- * empty workspace needs it. Cards, skeletons, and the empty state share
+ * The projects index: the workspace's shelf. Two regions on wide screens
+ * — the project rows on the left, the create panel pinned beside them;
+ * stacked on small screens with the panel first, where the empty
+ * workspace needs it. Rows, skeletons, and the empty state share
  * components with the dashboard so the two surfaces stay one system.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Box } from "lucide-react";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@slopcad/ui/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@slopcad/ui/components/empty";
+import { Panel, PanelHeader } from "@slopcad/ui/components/cockpit/panel";
 import { Skeleton } from "@slopcad/ui/components/skeleton";
 
 import {
@@ -32,7 +18,7 @@ import {
   type CreateProjectValues,
 } from "@/cad-projects/project-forms";
 import { AppPage, PageHeader } from "@/components/app/page";
-import { ProjectCard } from "@/components/app/project-card";
+import { ProjectRow } from "@/components/app/project-row";
 import { plural } from "@/utils/format";
 import { useTRPC } from "@/utils/trpc";
 import { useProjectsWebMcpTools } from "@/webmcp/projects-tools";
@@ -87,57 +73,59 @@ function ProjectsPage(): ReactElement {
         }
         title="Projects"
       />
-      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <aside className="lg:order-2 lg:sticky lg:top-16">
-          <Card data-testid="create-project-panel">
-            <CardHeader>
-              <CardTitle>New project</CardTitle>
-              <CardDescription>
+      <div className="grid items-start gap-(--gap-group) lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <aside className="lg:order-2 lg:sticky lg:top-(--gap-group)">
+          <Panel data-testid="create-project-panel">
+            <PanelHeader title="New project" titleAs="h2" />
+            <div className="p-(--pad-panel)">
+              <p className="mb-(--gap) text-ui text-ink-dim">
                 Projects group documents and their version history.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+              </p>
               <CreateProjectForm onSubmitted={handleCreate} />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         </aside>
-        <section aria-label="Your projects" className="lg:order-1">
+        <Panel aria-label="Your projects" className="lg:order-1">
+          {/* Deliberately NOT a heading: the page's h1 already says
+              "Projects", and a second heading whose accessible name
+              contains that word makes every `getByRole("heading", { name:
+              "Projects" })` ambiguous. A panel is furniture (see the
+              Panel primitive) — the region carries the name instead. */}
+          <PanelHeader
+            title="Your projects"
+            trailing={projectsQuery.isPending ? "…" : String(projects.length)}
+          />
           {projectsQuery.isPending ? (
-            <div aria-hidden="true" className="grid gap-3 md:grid-cols-2">
+            <div aria-hidden="true" className="flex flex-col gap-px">
               {Array.from({ length: 4 }, (_, index) => (
-                <Skeleton key={index} className="h-28" />
+                <Skeleton key={index} className="h-(--row-h-lg) w-full" />
               ))}
             </div>
           ) : projectsQuery.isError ? (
-            <p className="text-destructive text-sm" role="alert">
+            <p
+              className="p-(--pad-panel) text-ui text-destructive"
+              role="alert"
+            >
               Projects could not be loaded: {projectsQuery.error.message}
             </p>
           ) : projects.length === 0 ? (
-            <Empty className="border">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Box />
-                </EmptyMedia>
-                <EmptyTitle>No projects yet</EmptyTitle>
-                <EmptyDescription>
-                  Name one in the New project panel and it appears here, ready
-                  for its first document.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
+            <div className="p-(--gap-group)">
+              <p className="text-title text-ink">No projects yet</p>
+              <p className="mt-1 max-w-[72ch] text-body text-ink-dim">
+                Name one in the New project panel and it appears here, ready for
+                its first document.
+              </p>
+            </div>
           ) : (
-            <ul
-              className="grid gap-3 md:grid-cols-2"
-              data-testid="project-list"
-            >
+            <ul data-testid="project-list">
               {projects.map((project) => (
                 <li key={project.id}>
-                  <ProjectCard project={project} />
+                  <ProjectRow project={project} />
                 </li>
               ))}
             </ul>
           )}
-        </section>
+        </Panel>
       </div>
     </AppPage>
   );

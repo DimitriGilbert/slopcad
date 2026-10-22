@@ -512,7 +512,6 @@
             "apps/web/src/cad-workbench/topology-pick-panel.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
             "apps/web/src/component-preview/ComponentPreviewPage.tsx",
-            "apps/web/src/components/app/project-card.tsx",
             "apps/web/src/components/header.tsx",
             "apps/web/src/components/scheme-picker.tsx",
             "apps/web/src/components/theme-toggle.tsx",
@@ -523,7 +522,6 @@
             "apps/web/src/routes/_auth/projects.$projectId.tsx",
             "apps/web/src/routes/_auth/projects.index.tsx",
             "apps/web/src/routes/index.tsx",
-            "apps/web/src/routes/login.tsx",
             "apps/web/src/viewer/ViewerSurface.tsx",
             "packages/ui/src/agent/chat/parts/busy.tsx",
             "packages/ui/src/agent/chat/parts/subagent-part.tsx",
@@ -7199,6 +7197,12 @@
           "value": "project-persistence-bar",
           "files": [
             "apps/web/src/cad-projects/ProjectWorkbenchPage.tsx"
+          ]
+        },
+        {
+          "value": "recent-project-list",
+          "files": [
+            "apps/web/src/routes/_auth/dashboard.tsx"
           ]
         },
         {

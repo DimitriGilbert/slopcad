@@ -7,25 +7,21 @@
  * row. Loading, error, and empty states are first-class: skeletons
  * match the final layout's shape, and a new user sees one clear way
  * into the product.
+ *
+ * The glance is a readout strip and the shelf is a panel of rows — the
+ * same two devices the cockpit uses for exactly these two jobs.
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { Box, ChevronRight } from "lucide-react";
 import type { ReactElement } from "react";
 import { Button } from "@slopcad/ui/components/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@slopcad/ui/components/empty";
+import { Panel, PanelHeader } from "@slopcad/ui/components/cockpit/panel";
+import { Readout } from "@slopcad/ui/components/cockpit/property-row";
 import { Skeleton } from "@slopcad/ui/components/skeleton";
 
 import { AppPage, PageHeader } from "@/components/app/page";
-import { ProjectCard } from "@/components/app/project-card";
+import { ProjectRow } from "@/components/app/project-row";
 import { formatStamp } from "@/utils/format";
 import { useTRPC } from "@/utils/trpc";
 import { useProjectsWebMcpTools } from "@/webmcp/projects-tools";
@@ -34,7 +30,7 @@ export const Route = createFileRoute("/_auth/dashboard")({
   component: RouteComponent,
 });
 
-const RECENT_COUNT = 6;
+const RECENT_COUNT = 8;
 
 function RouteComponent(): ReactElement {
   const { session } = Route.useRouteContext();
@@ -44,6 +40,10 @@ function RouteComponent(): ReactElement {
 
   const projects = projectsQuery.data ?? [];
   const lastActivityAt = projects[0]?.updatedAt;
+  const documentTotal = projects.reduce(
+    (sum, project) => sum + project.documentCount,
+    0,
+  );
 
   return (
     <AppPage>
@@ -58,101 +58,74 @@ function RouteComponent(): ReactElement {
       {projectsQuery.isPending ? (
         <DashboardSkeleton />
       ) : projectsQuery.isError ? (
-        <p className="text-destructive text-sm" role="alert">
+        <p className="text-ui text-destructive" role="alert">
           Projects could not be loaded: {projectsQuery.error.message}
         </p>
       ) : projects.length === 0 ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Box />
-            </EmptyMedia>
-            <EmptyTitle>No projects yet</EmptyTitle>
-            <EmptyDescription>
-              Projects group documents, and each document keeps a model with its
-              saved versions. Create the first one to start modeling.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button render={<Link to="/projects" />}>New project</Button>
-          </EmptyContent>
-        </Empty>
+        <Panel>
+          <PanelHeader title="Workspace" titleAs="h2" trailing="empty" />
+          <div className="flex flex-col items-start gap-(--gap-group) p-(--gap-group)">
+            <div>
+              <p className="text-title text-ink">No projects yet</p>
+              <p className="mt-1 max-w-[72ch] text-body text-ink-dim">
+                Projects group documents, and each document keeps a model with
+                its saved versions. Create the first one to start modeling.
+              </p>
+            </div>
+            <Button render={<Link to="/projects" />} size="sm">
+              New project
+            </Button>
+          </div>
+        </Panel>
       ) : (
         <>
-          <section
-            aria-label="Workspace totals"
-            className="border-border bg-card grid grid-cols-1 divide-y divide-border border sm:grid-cols-3 sm:divide-x sm:divide-y-0"
-          >
-            <StatCell label="Projects" value={String(projects.length)} />
-            <StatCell
-              label="Documents"
-              value={String(
-                projects.reduce(
-                  (sum, project) => sum + project.documentCount,
-                  0,
-                ),
-              )}
-            />
-            <StatCell
-              label="Last activity"
-              value={
-                lastActivityAt === undefined
+          {/* The glance: three facts, as the instrument states facts. */}
+          <Panel aria-label="Workspace totals">
+            <div className="flex flex-wrap items-center gap-x-(--gap-group) gap-y-2 p-(--pad-panel)">
+              <Readout label="projects">{String(projects.length)}</Readout>
+              <Readout label="documents">{String(documentTotal)}</Readout>
+              <Readout label="last activity">
+                {lastActivityAt === undefined
                   ? "never"
-                  : formatStamp(lastActivityAt)
+                  : formatStamp(lastActivityAt)}
+              </Readout>
+            </div>
+          </Panel>
+          <Panel aria-label="Recent projects" className="mt-(--gap-group)">
+            <PanelHeader
+              title="Recent projects"
+              titleAs="h2"
+              trailing={
+                <Link
+                  className="text-micro text-ink-dim transition-colors duration-(--dur-state) hover:text-ink focus-instrument"
+                  to="/projects"
+                >
+                  all projects
+                </Link>
               }
             />
-          </section>
-          <section aria-label="Recent projects" className="mt-10">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-medium">Recent projects</h2>
-              <Link
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
-                to="/projects"
-              >
-                All projects
-                <ChevronRight className="size-3" />
-              </Link>
-            </div>
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ul data-testid="recent-project-list">
               {projects.slice(0, RECENT_COUNT).map((project) => (
                 <li key={project.id}>
-                  <ProjectCard project={project} />
+                  <ProjectRow project={project} />
                 </li>
               ))}
             </ul>
-          </section>
+          </Panel>
         </>
       )}
     </AppPage>
   );
 }
 
-function StatCell({
-  label,
-  value,
-}: {
-  readonly label: string;
-  readonly value: string;
-}): ReactElement {
-  return (
-    <div className="px-4 py-3">
-      <div className="text-muted-foreground font-mono text-[11px] tracking-wider uppercase">
-        {label}
-      </div>
-      <div className="mt-1 font-mono text-xl font-medium tabular-nums">
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function DashboardSkeleton(): ReactElement {
   return (
     <div aria-hidden="true">
-      <Skeleton className="h-[74px] w-full" />
-      <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 3 }, (_, index) => (
-          <Skeleton key={index} className="h-28" />
+      <Skeleton className="h-10 w-full" />
+      <div className="mt-(--gap-group) flex flex-col gap-px">
+        <Skeleton className="h-(--header-h) w-full" />
+        {Array.from({ length: 4 }, (_, index) => (
+          <Skeleton key={index} className="h-(--row-h-lg) w-full" />
         ))}
       </div>
     </div>
