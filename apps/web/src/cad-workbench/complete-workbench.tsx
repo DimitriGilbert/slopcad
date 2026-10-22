@@ -2450,9 +2450,15 @@ export function CompleteCadWorkbench({
         onUndo={historyApi.undo}
         toolbar={toolbar}
       />
-      {/* TOP′ — the armed tool's own options strip. Present only while a
-          tool is live, and never in sketch mode (whose strip is step 4's). */}
-      {mode === "sketch" ? null : (
+      {/* TOP′ — the armed tool's own options strip, SECOND to the
+          inspector rail's `ToolOptionsPanel`: one descriptor, one surface,
+          never printed twice. The bar renders only while the inspector
+          rail is collapsed — the expanded rail already hosts the same
+          options in the Selection/armed section, and a second surface 60px
+          away is the same fact told twice. In sketch mode the rail's whole
+          workspace is hidden and the sketch editor carries its own strip,
+          so the bar yields there too. */}
+      {mode === "sketch" || !rails.isCollapsed("inspector") ? null : (
         <ToolOptionsBar descriptor={armedToolOptions} />
       )}
       {mode === "sketch" ? (
