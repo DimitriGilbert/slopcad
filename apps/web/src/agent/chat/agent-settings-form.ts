@@ -32,7 +32,10 @@
  */
 
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
-import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
+import type {
+  FormedibleFieldComponent,
+  FormedibleFieldConfig,
+} from "@slopcad/ui/components/formedible/lib/types";
 import { z } from "zod";
 import type { NamedProviderId } from "@slopcad/api/providers";
 import {
@@ -130,6 +133,131 @@ export function namedCatalogProviderOf(
     return null;
   }
   return provider;
+}
+
+/**
+ * One option in the model picker's list — what the sheet hands the
+ * command-picker field for the LIVE provider. `label` is the human name
+ * (a bare id for the BYO endpoint's `/models` list), `value` the model
+ * id committed to the form, `family` the group heading, and `detail`
+ * the right-edge readout (context size) when the catalog declares one.
+ */
+export interface AgentModelPickerOption {
+  readonly value: string;
+  readonly label: string;
+  readonly family: string;
+  readonly detail?: string;
+}
+
+/**
+ * How the picker's option source is doing. `loading`/`error`/`empty`
+ * render an honest state line inside the list (no fake success): an
+ * upstream or transport failure keeps whatever entries were already
+ * served — `options` may be non-empty under `error` (the stale cache).
+ */
+export type AgentModelPickerStatus =
+  | { readonly kind: "ready" }
+  | { readonly kind: "loading" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "empty"; readonly message: string };
+
+/**
+ * Everything the command-picker field needs, resolved by the sheet for
+ * the LIVE provider: the (already grouped-by-family-at-render) options,
+ * the source's status, and the empty-state copy for that source.
+ */
+export interface AgentModelPickerData {
+  readonly options: readonly AgentModelPickerOption[];
+  readonly status: AgentModelPickerStatus;
+  /**
+   * The text the list shows while nothing matches the search AND the
+   * source has options, or while the source is `ready` with none —
+   * each naming the raw-id escape hatch (D5's always-typable rule).
+   */
+  readonly emptyText: string;
+}
+
+/** `fieldConfig.pickerData` on the `modelId` field (custom-prop channel). */
+export const MODEL_PICKER_DATA_PROP = "pickerData";
+
+/**
+ * The group heading a model belongs under, derived without any catalog
+ * field the cache does not store: cut a display NAME at its first
+ * digit-bearing token ("Claude Sonnet 4.5" → "Claude Sonnet",
+ * "Gemini 3 Pro" → "Gemini"); a digit-leading first token ("GPT-5.2")
+ * yields its alpha head ("GPT"). Bare ids take the same rule on
+ * dash-segments ("claude-sonnet-4-5" → "claude-sonnet"), and a name or
+ * id with no usable stem groups under itself.
+ */
+export function modelFamilyOf(name: string, modelId: string): string {
+  const tokens = name.trim().split(/\s+/).filter(Boolean);
+  const nameCut = tokens.findIndex((token) => /\d/.test(token));
+  if (nameCut > 0) {
+    return tokens.slice(0, nameCut).join(" ");
+  }
+  if (nameCut === 0) {
+    const stem = (tokens[0] ?? "").replace(/\d.*$/, "").replace(/[-.]+$/, "");
+    if (stem.length >= 2) {
+      return stem;
+    }
+  }
+  const segments = modelId.trim().split("-").filter(Boolean);
+  const idCut = segments.findIndex((segment) => /\d/.test(segment));
+  if (idCut > 0) {
+    return segments.slice(0, idCut).join("-");
+  }
+  if (idCut === 0) {
+    const stem = (segments[0] ?? "").replace(/\d.*$/, "");
+    if (stem.length >= 2) {
+      return stem;
+    }
+  }
+  return name.trim() !== "" ? name.trim() : modelId.trim();
+}
+
+/**
+ * The picker's right-edge context readout: models.dev `limit.context`
+ * compacted (128000 → "128k", 1_000_000 → "1M"), undefined when the
+ * model declares no limit.
+ */
+export function formatContextLimit(limit: number | null): string | undefined {
+  if (limit === null || !Number.isInteger(limit) || limit <= 0) {
+    return undefined;
+  }
+  if (limit >= 1_000_000) {
+    const millions = limit / 1_000_000;
+    return `${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M`;
+  }
+  if (limit >= 1000) {
+    return `${Math.round(limit / 1000)}k`;
+  }
+  return String(limit);
+}
+
+/**
+ * Groups picker options by family, preserving each family's first-seen
+ * order and the catalog's newest-first ordering within it. Pure so the
+ * node test pins the grouping without rendering the picker.
+ */
+export function groupModelPickerOptions(
+  options: readonly AgentModelPickerOption[],
+): readonly {
+  readonly family: string;
+  readonly options: AgentModelPickerOption[];
+}[] {
+  const groups: { family: string; options: AgentModelPickerOption[] }[] = [];
+  const byFamily = new Map<string, AgentModelPickerOption[]>();
+  for (const option of options) {
+    const bucket = byFamily.get(option.family);
+    if (bucket === undefined) {
+      const created: AgentModelPickerOption[] = [option];
+      byFamily.set(option.family, created);
+      groups.push({ family: option.family, options: created });
+    } else {
+      bucket.push(option);
+    }
+  }
+  return groups;
 }
 
 /**
@@ -335,21 +463,25 @@ export interface AgentSettingsFieldsDeps {
   /**
    * The form's LIVE provider selection (D14) — what the open sheet has
    * chosen, not the saved config's provider. The sheet rebuilds these
-   * fields whenever the in-form selection changes, and the factory hands
-   * each rebuild's selection to the model picker's option source, so the
-   * picker re-keys without a save.
+   * fields whenever the in-form selection changes, so the picker re-keys
+   * without a save.
    */
   readonly liveProvider: AgentProviderId | null;
   /** Whether `serverProviders()` allows the server mode option (D13). */
   readonly serverModeAllowed: boolean;
   /**
-   * The model picker's async option source (catalog query or endpoint),
-   * invoked with the LIVE provider selection the fields were built for.
+   * The model picker's renderer — the sheet injects its `command`-based
+   * grouped picker here so this module stays React-free. Optional: node
+   * tests pin the config without a renderer (the field then falls back
+   * to the registry's autocomplete).
    */
-  readonly modelAsyncOptions: (
-    query: string,
-    liveProvider: AgentProviderId | null,
-  ) => Promise<readonly { value: string; label: string }[]>;
+  readonly modelPickerComponent?: FormedibleFieldComponent<AgentSettingsValues>;
+  /**
+   * The picker's option list + source status for the LIVE provider
+   * (catalog cache or endpoint `/models`); lands on the field's custom
+   * `pickerData` prop for the component to read.
+   */
+  readonly modelPickerData: AgentModelPickerData;
   /**
    * The catalog `reasoning_options` entry of the model the VALUES name —
    * read per conditional/options evaluation, so both reasoning controls
@@ -400,6 +532,17 @@ export function reasoningEffortOptionsOf(
 }
 
 /**
+ * The field list's three named groups (the dialog's section bands —
+ * "provider section + model section + connection/auth state" read as
+ * three runs): Connection holds the mode/provider/key/endpoint set,
+ * Model the picker + raw id + reasoning controls, Behavior the prompt,
+ * iteration bound and sync opt-in.
+ */
+const SECTION_CONNECTION = "Connection";
+const SECTION_MODEL = "Model";
+const SECTION_BEHAVIOR = "Behavior";
+
+/**
  * Builds the field list. Conditional visibility is config, not code:
  * `conditional` functions read the live values, so provider and mode
  * switches restyle the form without any hand-rolled field juggling.
@@ -415,6 +558,7 @@ export function createAgentSettingsFields(
       label: "Mode",
       description: "Where the model calls run.",
       options: modeOptions(deps.serverModeAllowed),
+      section: SECTION_CONNECTION,
     },
     {
       name: "provider",
@@ -429,6 +573,7 @@ export function createAgentSettingsFields(
         },
         ...AGENT_PROVIDER_OPTIONS,
       ],
+      section: SECTION_CONNECTION,
     },
     {
       name: "apiKey",
@@ -439,6 +584,7 @@ export function createAgentSettingsFields(
       passwordConfig: { showToggle: true },
       placeholder: "sk-…",
       conditional: (values) => values.provider !== "",
+      section: SECTION_CONNECTION,
     },
     {
       name: "openAiCompatibleBaseUrl",
@@ -448,34 +594,30 @@ export function createAgentSettingsFields(
         "The endpoint's own base URL, e.g. https://host/v1 — its /models list feeds the picker.",
       placeholder: "https://your-endpoint/v1",
       conditional: (values) => values.provider === "openai-compatible",
+      section: SECTION_CONNECTION,
     },
     {
       name: "modelId",
       type: "autocomplete",
+      // The command-picker renderer is injected by the sheet (this module
+      // stays React-free); `pickerData` is the custom-prop channel the
+      // component reads its options + source status from.
+      component: deps.modelPickerComponent,
+      [MODEL_PICKER_DATA_PROP]: deps.modelPickerData,
       label: "Model",
-      description:
-        "Search the {{provider}} model list; nothing is preselected.",
-      placeholder: "Search models…",
-      autocompleteConfig: {
-        allowCustom: false,
-        // The picker's source keys on the LIVE selection this field list
-        // was built for — the sheet rebinds the list on every provider
-        // switch, so the option fetch follows the form without a save.
-        asyncOptions: (query) =>
-          deps.modelAsyncOptions(query, deps.liveProvider),
-        debounceMs: 200,
-        minChars: 0,
-        noOptionsText: "No models — type a raw id below or refresh.",
-      },
+      description: "Search the {{provider}} catalog; nothing is preselected.",
+      placeholder: "Choose a model…",
       conditional: (values) => values.provider !== "",
+      section: SECTION_MODEL,
     },
     {
       name: "rawModelId",
       type: "text",
       label: "Model id",
       description:
-        "The exact model string sent to the provider — it follows the picker above; type here to override.",
+        "The exact model string sent to the provider — it follows the picker; type here to override or when the catalog does not list the model.",
       placeholder: "type any model id",
+      section: SECTION_MODEL,
     },
     {
       name: "reasoningEffort",
@@ -490,6 +632,7 @@ export function createAgentSettingsFields(
         })),
       conditional: (values) =>
         reasoningEffortOptionsOf(reasoningOptionOf(values)).length > 0,
+      section: SECTION_MODEL,
     },
     {
       name: "reasoningBudgetTokens",
@@ -515,6 +658,7 @@ export function createAgentSettingsFields(
           ? `The model's minimum thinking budget is ${option.min} tokens (0 disables).`
           : null;
       },
+      section: SECTION_MODEL,
     },
     {
       name: "systemPrompt",
@@ -524,6 +668,8 @@ export function createAgentSettingsFields(
         "Your instruction to the agent. The document state and tool catalogue are appended automatically.",
       rows: 5,
       textareaConfig: { resize: "vertical" },
+      className: "sm:col-span-full",
+      section: SECTION_BEHAVIOR,
     },
     {
       name: "maxIterations",
@@ -533,6 +679,7 @@ export function createAgentSettingsFields(
       min: 1,
       max: AGENT_MAX_ITERATIONS_CEILING,
       step: 1,
+      section: SECTION_BEHAVIOR,
     },
     {
       name: "syncEnabled",
@@ -541,6 +688,7 @@ export function createAgentSettingsFields(
       description:
         "Opt-in: local conversations also push to your slopcad account.",
       conditional: (values) => values.mode === "client",
+      section: SECTION_BEHAVIOR,
     },
   ];
 }

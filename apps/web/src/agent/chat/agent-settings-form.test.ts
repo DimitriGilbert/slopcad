@@ -15,7 +15,10 @@ import {
   agentSettingsValuesFromConfig,
   apiKeySeedFor,
   createAgentSettingsFields,
+  formatContextLimit,
+  groupModelPickerOptions,
   liveProviderOf,
+  modelFamilyOf,
   modelPickerSourceFor,
   pickerMirroredRawId,
   reasoningEffortOptionsOf,
@@ -66,7 +69,11 @@ function fields(
 ): readonly FormedibleFieldConfig<AgentSettingsValues>[] {
   const deps: AgentSettingsFieldsDeps = {
     liveProvider,
-    modelAsyncOptions: () => Promise.resolve([]),
+    modelPickerData: {
+      emptyText: "no models",
+      options: [],
+      status: { kind: "ready" },
+    },
     reasoningOptionOf: (current) => {
       const id = resolveSettingsModelId(current);
       return id === null ? undefined : reasoningByModel[id];
@@ -620,34 +627,121 @@ describe("createAgentSettingsFields (conditional visibility as config)", () => {
     expect(options.some((option) => option.value === UNSET_CHOICE)).toBe(true);
   });
 
-  it("hands the picker's option source the LIVE selection each build was made for", async () => {
+  it("binds the picker's data + renderer for the LIVE selection each build was made for", () => {
     // The sheet rebuilds the fields on every in-form provider switch;
-    // each rebuild's option source must carry that moment's selection,
-    // so the picker re-keys without a save (D14).
-    const seen: (AgentProviderId | null)[] = [];
+    // each rebuild's picker payload must be the one the deps were minted
+    // with, so the picker re-keys without a save (D14).
+    const component = () => null;
     const depsFor = (
       liveProvider: AgentProviderId | null,
     ): AgentSettingsFieldsDeps => ({
       liveProvider,
-      modelAsyncOptions: (_query, liveSelection) => {
-        seen.push(liveSelection);
-        return Promise.resolve([]);
+      modelPickerComponent: component,
+      modelPickerData: {
+        emptyText: `empty-${String(liveProvider)}`,
+        options: [
+          { family: "f", label: "m", value: `m-${String(liveProvider)}` },
+        ],
+        status: { kind: "ready" },
       },
       reasoningOptionOf: () => undefined,
       serverModeAllowed: false,
     });
-    await fieldOf(
+    const openrouter = fieldOf(
       createAgentSettingsFields(depsFor("openrouter")),
       "modelId",
-    ).autocompleteConfig?.asyncOptions?.("");
-    await fieldOf(
+    );
+    expect(openrouter.component).toBe(component);
+    expect(openrouter.pickerData).toEqual(
+      depsFor("openrouter").modelPickerData,
+    );
+    const endpoint = fieldOf(
       createAgentSettingsFields(depsFor("openai-compatible")),
       "modelId",
-    ).autocompleteConfig?.asyncOptions?.("");
-    await fieldOf(
-      createAgentSettingsFields(depsFor(null)),
-      "modelId",
-    ).autocompleteConfig?.asyncOptions?.("");
-    expect(seen).toEqual(["openrouter", "openai-compatible", null]);
+    );
+    expect(endpoint.pickerData).toEqual(
+      depsFor("openai-compatible").modelPickerData,
+    );
+  });
+
+  it("groups the field list into the sheet's three sections", () => {
+    const list = fields();
+    expect(fieldOf(list, "mode").section).toBe("Connection");
+    expect(fieldOf(list, "provider").section).toBe("Connection");
+    expect(fieldOf(list, "apiKey").section).toBe("Connection");
+    expect(fieldOf(list, "openAiCompatibleBaseUrl").section).toBe("Connection");
+    expect(fieldOf(list, "modelId").section).toBe("Model");
+    expect(fieldOf(list, "rawModelId").section).toBe("Model");
+    expect(fieldOf(list, "reasoningEffort").section).toBe("Model");
+    expect(fieldOf(list, "reasoningBudgetTokens").section).toBe("Model");
+    expect(fieldOf(list, "systemPrompt").section).toBe("Behavior");
+    expect(fieldOf(list, "maxIterations").section).toBe("Behavior");
+    expect(fieldOf(list, "syncEnabled").section).toBe("Behavior");
+  });
+});
+
+describe("modelFamilyOf (the picker's group headings)", () => {
+  it("cuts a display name at its first digit-bearing token", () => {
+    expect(modelFamilyOf("Claude Sonnet 4.5", "claude-sonnet-4-5")).toBe(
+      "Claude Sonnet",
+    );
+    expect(modelFamilyOf("Gemini 3 Pro", "gemini-3-pro")).toBe("Gemini");
+    expect(modelFamilyOf("GPT-5.1 Codex", "gpt-5.1-codex")).toBe("GPT");
+  });
+
+  it("takes a digit-leading first token's alpha head", () => {
+    expect(modelFamilyOf("GPT-5.2", "gpt-5.2")).toBe("GPT");
+    expect(modelFamilyOf("GPT-4o", "gpt-4o")).toBe("GPT");
+  });
+
+  it("derives from the id when the name has no usable stem", () => {
+    expect(modelFamilyOf("o3", "o3")).toBe("o3");
+    expect(modelFamilyOf("", "claude-sonnet-4-5")).toBe("claude-sonnet");
+    expect(modelFamilyOf("", "llama-3.1-70b")).toBe("llama");
+  });
+
+  it("falls back to the name or id itself when nothing yields a stem", () => {
+    expect(modelFamilyOf("Codex Mini Latest", "codex-mini-latest")).toBe(
+      "Codex Mini Latest",
+    );
+    expect(modelFamilyOf("", "my-finetune")).toBe("my-finetune");
+  });
+});
+
+describe("formatContextLimit (the picker's right-edge readout)", () => {
+  it("compacts to k and M", () => {
+    expect(formatContextLimit(128000)).toBe("128k");
+    expect(formatContextLimit(1000000)).toBe("1M");
+    expect(formatContextLimit(1500000)).toBe("1.5M");
+    expect(formatContextLimit(640)).toBe("640");
+  });
+
+  it("is undefined for absent or malformed limits", () => {
+    expect(formatContextLimit(null)).toBeUndefined();
+    expect(formatContextLimit(0)).toBeUndefined();
+    expect(formatContextLimit(-5)).toBeUndefined();
+  });
+});
+
+describe("groupModelPickerOptions (first-seen family order)", () => {
+  it("groups by family preserving order", () => {
+    const groups = groupModelPickerOptions([
+      { family: "Claude Sonnet", label: "a", value: "a" },
+      { family: "GPT", label: "b", value: "b" },
+      { family: "Claude Sonnet", label: "c", value: "c" },
+    ]);
+    expect(groups.map((group) => group.family)).toEqual([
+      "Claude Sonnet",
+      "GPT",
+    ]);
+    expect(groups[0]?.options.map((option) => option.value)).toEqual([
+      "a",
+      "c",
+    ]);
+    expect(groups[1]?.options.map((option) => option.value)).toEqual(["b"]);
+  });
+
+  it("answers empty for no options", () => {
+    expect(groupModelPickerOptions([])).toEqual([]);
   });
 });

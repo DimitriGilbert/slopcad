@@ -512,6 +512,7 @@
         {
           "value": "true",
           "files": [
+            "apps/web/src/agent/chat/agent-settings.tsx",
             "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/analysis-workbench.tsx",
             "apps/web/src/cad-workbench/complete-workbench.tsx",
@@ -577,6 +578,7 @@
         {
           "value": "true",
           "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx",
             "packages/ui/src/components/cad/cad-parameter-manager.tsx",
             "packages/ui/src/components/formedible/fields/autocomplete-field.tsx",
             "packages/ui/src/components/formedible/fields/checkbox-field.tsx",
@@ -598,6 +600,7 @@
         }
       ],
       "dynamicFiles": [
+        "apps/web/src/agent/chat/agent-model-picker.tsx",
         "packages/ui/src/components/cad/cad-parameter-manager.tsx",
         "packages/ui/src/components/formedible/fields/autocomplete-field.tsx",
         "packages/ui/src/components/formedible/fields/checkbox-field.tsx",
@@ -949,6 +952,18 @@
           ]
         },
         {
+          "value": "Model",
+          "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx"
+          ]
+        },
+        {
+          "value": "Model list",
+          "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx"
+          ]
+        },
+        {
           "value": "New sheet",
           "files": [
             "apps/web/src/cad-workbench/drawing-workbench.tsx"
@@ -1125,6 +1140,12 @@
           ]
         },
         {
+          "value": "Search models",
+          "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx"
+          ]
+        },
+        {
           "value": "section",
           "files": [
             "apps/web/src/cad-workbench/measurement-section.tsx"
@@ -1295,6 +1316,7 @@
         }
       ],
       "dynamicFiles": [
+        "apps/web/src/agent/chat/agent-model-picker.tsx",
         "apps/web/src/cad-workbench/SketchMode.tsx",
         "apps/web/src/cad-workbench/drawing-workbench.tsx",
         "apps/web/src/cad-workbench/feature-forms.tsx",
@@ -2567,6 +2589,14 @@
       "values": [],
       "dynamicFiles": [
         "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx"
+      ]
+    },
+    {
+      "attribute": "data-checked",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "apps/web/src/agent/chat/agent-model-picker.tsx"
       ]
     },
     {
@@ -6765,6 +6795,18 @@
           ]
         },
         {
+          "value": "agent-settings-model-picker",
+          "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx"
+          ]
+        },
+        {
+          "value": "agent-settings-picker-status",
+          "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx"
+          ]
+        },
+        {
           "value": "agent-settings-refetch-endpoint",
           "files": [
             "apps/web/src/agent/chat/agent-settings.tsx"
@@ -8653,6 +8695,7 @@
         {
           "value": "alert",
           "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx",
             "apps/web/src/agent/chat/agent-settings.tsx",
             "apps/web/src/cad-workbench/complete-workbench.tsx",
             "apps/web/src/cad-workbench/topology-pick-panel.tsx",
@@ -8800,6 +8843,7 @@
         {
           "value": "status",
           "files": [
+            "apps/web/src/agent/chat/agent-model-picker.tsx",
             "apps/web/src/agent/chat/agent-settings.tsx",
             "apps/web/src/cad-workbench/drawing-workbench.tsx",
             "apps/web/src/cad-workbench/topology-pick-panel.tsx",

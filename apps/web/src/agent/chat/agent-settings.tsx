@@ -32,7 +32,11 @@ import type { ReactElement, RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import { RefreshCwIcon } from "lucide-react";
-import { Button } from "@slopcad/ui/components/button";
+import {
+  StatusDot,
+  type StatusTone,
+} from "@slopcad/ui/components/cockpit/property-row";
+import { ToolButton } from "@slopcad/ui/components/cockpit/tool-button";
 import {
   Dialog,
   DialogContent,
@@ -52,16 +56,20 @@ import {
 } from "@slopcad/ui/agent/providers";
 import { listOpenAiCompatibleModels } from "@slopcad/ui/agent/providers/openai-compatible";
 
+import { AgentModelPickerField } from "./agent-model-picker";
 import {
   agentSettingsSchema,
   agentSettingsValuesFromConfig,
   apiKeySeedFor,
   createAgentSettingsFields,
+  formatContextLimit,
   liveProviderOf,
+  modelFamilyOf,
   modelPickerSourceFor,
   namedCatalogProviderOf,
   pickerMirroredRawId,
   resolveSettingsModelId,
+  type AgentModelPickerData,
   type AgentSettingsValues,
 } from "./agent-settings-form";
 
@@ -145,6 +153,79 @@ export function AgentSettingsSheet({
   const [endpointModels, setEndpointModels] = useState<readonly string[]>([]);
   const [endpointListAvailable, setEndpointListAvailable] = useState(true);
 
+  /**
+   * The picker's option source + status for the LIVE provider (D14):
+   * catalog entries become labelled options (name + id + context size,
+   * grouped by the derived family); the BYO endpoint lists bare ids.
+   * Failure states are first-class — a catalog query error still serves
+   * whatever the cache returned last, marked as the stale list.
+   */
+  const modelPickerData = useMemo<AgentModelPickerData>(() => {
+    const source = modelPickerSourceFor(liveProvider);
+    if (source === "endpoint") {
+      return {
+        emptyText:
+          "The endpoint lists no models — re-fetch it or type a raw id in the Model id field.",
+        options: endpointModels.map((modelId) => ({
+          family: modelFamilyOf("", modelId),
+          label: modelId,
+          value: modelId,
+        })),
+        status: endpointListAvailable
+          ? endpointModels.length === 0
+            ? {
+                kind: "empty",
+                message:
+                  "The endpoint's /models answered nothing usable — type the model id directly.",
+              }
+            : { kind: "ready" }
+          : {
+              kind: "error",
+              message:
+                "The endpoint exposes no usable /models — type the model id directly.",
+            },
+      };
+    }
+    const status: AgentModelPickerData["status"] =
+      liveProvider === null
+        ? { kind: "empty", message: "Pick a provider to load its catalog." }
+        : catalogQuery.isPending
+          ? { kind: "loading" }
+          : catalogQuery.isError
+            ? {
+                kind: "error",
+                message:
+                  catalogEntries.length === 0
+                    ? "The catalog could not be loaded and nothing is cached — type a raw id or force-refresh."
+                    : "The catalog could not be reloaded — showing the last cached list.",
+              }
+            : catalogEntries.length === 0
+              ? {
+                  kind: "empty",
+                  message:
+                    "No models cached for this provider — force-refresh the catalog or type a raw id.",
+                }
+              : { kind: "ready" };
+    return {
+      emptyText:
+        "No models cached for this provider — force-refresh the catalog or type a raw id.",
+      options: catalogEntries.map((entry) => ({
+        detail: formatContextLimit(entry.contextLimit),
+        family: modelFamilyOf(entry.name, entry.modelId),
+        label: entry.name,
+        value: entry.modelId,
+      })),
+      status,
+    };
+  }, [
+    catalogEntries,
+    catalogQuery.isError,
+    catalogQuery.isPending,
+    endpointListAvailable,
+    endpointModels,
+    liveProvider,
+  ]);
+
   /** The reasoning option of the model the CURRENT values name. */
   const reasoningOptionOf = useCallback(
     (values: AgentSettingsValues): ModelReasoningOption | undefined => {
@@ -170,45 +251,12 @@ export function AgentSettingsSheet({
     () =>
       createAgentSettingsFields({
         liveProvider,
-        modelAsyncOptions: (query, pickerProvider) => {
-          const source = modelPickerSourceFor(pickerProvider);
-          const lowered = query.toLowerCase();
-          if (source === "endpoint") {
-            return Promise.resolve(
-              endpointModels
-                .filter((modelId) => modelId.toLowerCase().includes(lowered))
-                .map((modelId) => ({ label: modelId, value: modelId })),
-            );
-          }
-          if (source === "catalog") {
-            return Promise.resolve(
-              catalogEntries
-                .filter(
-                  (entry) =>
-                    entry.modelId.toLowerCase().includes(lowered) ||
-                    entry.name.toLowerCase().includes(lowered),
-                )
-                // The renderer shows the label with the committed id
-                // beneath it, so the human name labels and the id stays
-                // in reach.
-                .map((entry) => ({
-                  label: entry.name,
-                  value: entry.modelId,
-                })),
-            );
-          }
-          return Promise.resolve([]);
-        },
+        modelPickerComponent: AgentModelPickerField,
+        modelPickerData,
         reasoningOptionOf,
         serverModeAllowed,
       }),
-    [
-      catalogEntries,
-      endpointModels,
-      liveProvider,
-      reasoningOptionOf,
-      serverModeAllowed,
-    ],
+    [liveProvider, modelPickerData, reasoningOptionOf, serverModeAllowed],
   );
 
   const defaultValues = useMemo(
@@ -267,8 +315,27 @@ export function AgentSettingsSheet({
         );
       },
     },
+    /**
+     * The two-column field grid: every section band spans the row (the
+     * Formedible section marker carries the band styling — hairline,
+     * well wash, small-caps voice — so the form reads as the cockpit's
+     * stacked sections, not a card of floating inputs). `space-y-0`
+     * retires the layout default that would misalign grid rows.
+     */
+    formClassName:
+      "grid grid-cols-1 gap-x-(--gap-group) gap-y-4 space-y-0 sm:grid-cols-2 " +
+      "[&>[data-formedible-section]]:col-span-full " +
+      "[&>[data-formedible-section]]:-mx-(--pad-panel) " +
+      "[&>[data-formedible-section]]:border-t [&>[data-formedible-section]]:border-rule " +
+      "[&>[data-formedible-section]]:bg-well/60 " +
+      "[&>[data-formedible-section]]:px-(--pad-panel) [&>[data-formedible-section]]:py-1 " +
+      "[&_[data-formedible-section]>h2]:label-section [&_[data-formedible-section]>h2]:ink-faint " +
+      "[&_[data-formedible-section]>p]:text-ui [&_[data-formedible-section]>p]:ink-dim",
+    fieldClassName: "min-w-0",
     resetOnSubmitSuccess: false,
     schema: agentSettingsSchema,
+    submitButtonClassName:
+      "w-full sm:col-span-full sm:w-auto sm:justify-self-end",
     submitLabel: "Save settings",
   });
 
@@ -350,6 +417,43 @@ export function AgentSettingsSheet({
           : "The endpoint exposes no usable /models — type the model id below."
         : null;
 
+  // The status band's headline + lamp: the live source's own truth —
+  // what's actually in the list right now — with the refresh note riding
+  // after it. Nothing here fabricates readiness: a failed catalog load
+  // says so, an empty cache says so.
+  const statusHeadline =
+    pickerSource === "catalog"
+      ? catalogQuery.isPending
+        ? "Loading the model catalog…"
+        : catalogQuery.isError
+          ? catalogEntries.length === 0
+            ? "The model catalog could not be loaded — nothing cached"
+            : `The catalog could not be reloaded — ${String(catalogEntries.length)} cached models shown`
+          : catalogEntries.length === 0
+            ? "No models cached for this provider"
+            : `${String(catalogEntries.length)} models in the cached catalog`
+      : pickerSource === "endpoint"
+        ? endpointModels.length === 0
+          ? "No models discovered on the endpoint"
+          : `${String(endpointModels.length)} models discovered on the endpoint`
+        : null;
+  const statusTone: StatusTone =
+    refreshFailed || catalogQuery.isError
+      ? "error"
+      : catalogQuery.isPending || catalogRefresh.isPending
+        ? "parked"
+        : pickerSource === "catalog"
+          ? catalogEntries.length === 0
+            ? "warn"
+            : "ok"
+          : pickerSource === "endpoint"
+            ? !endpointListAvailable
+              ? "warn"
+              : endpointModels.length === 0
+                ? "idle"
+                : "ok"
+            : "idle";
+
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -360,7 +464,7 @@ export function AgentSettingsSheet({
       open
     >
       <DialogContent
-        className="max-h-[calc(100dvh-4rem)] sm:max-w-md"
+        className="max-h-[calc(100dvh-4rem)] sm:max-w-2xl"
         data-testid="agent-settings-dialog"
         finalFocus={finalFocus}
       >
@@ -372,68 +476,79 @@ export function AgentSettingsSheet({
           </DialogDescription>
         </DialogHeader>
 
-        {(pickerSource === "catalog" || pickerSource === "endpoint") && (
-          <div
-            className="flex items-center gap-2"
-            data-testid="agent-settings-refresh-row"
-          >
-            {pickerSource === "catalog" ? (
-              <Button
-                aria-label="Force-refresh the model catalog"
-                data-testid="agent-settings-refresh-catalog"
-                disabled={catalogRefresh.isPending}
-                onClick={handleRefreshCatalog}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                <RefreshCwIcon />
-                Force-refresh catalog
-              </Button>
-            ) : (
-              <Button
-                aria-label="Re-fetch the endpoint's model list"
-                data-testid="agent-settings-refetch-endpoint"
-                onClick={handleRefetchEndpoint}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                <RefreshCwIcon />
-                Re-fetch models
-              </Button>
-            )}
-            {refreshNote === null ? null : (
-              <span
-                className={`min-w-0 text-xs ${
-                  refreshFailed ? "text-destructive" : "text-muted-foreground"
-                }`}
-                data-testid={
-                  refreshFailed ? "agent-settings-refresh-error" : undefined
-                }
-                role={refreshFailed ? "alert" : undefined}
-              >
-                {refreshNote}
-              </span>
-            )}
-          </div>
-        )}
-
         {serverProvidersQuery.isPending && serverProvidersQuery.isFetching ? (
-          <p className="text-muted-foreground text-xs" role="status">
+          <p className="text-ui ink-dim" role="status">
             Checking server availability…
           </p>
         ) : null}
 
+        {/* The connection strip: the live source's own status — what the
+            picker will actually offer — plus the source's one refresh
+            action. The lamp carries tone AND the words say the state, so
+            a failure is never colour-only and never silent. */}
+        {(pickerSource === "catalog" || pickerSource === "endpoint") && (
+          <div
+            className="flex min-h-(--row-h) items-center gap-(--gap) rounded-sm border border-rule bg-well px-(--pad-row) py-1"
+            data-testid="agent-settings-refresh-row"
+          >
+            <StatusDot
+              label={
+                pickerSource === "catalog"
+                  ? "catalog status"
+                  : "endpoint status"
+              }
+              tone={statusTone}
+            />
+            <span className="min-w-0 flex-1 truncate text-ui ink-dim">
+              {statusHeadline}
+              {refreshNote === null ? null : (
+                <span
+                  className={` ${
+                    refreshFailed ? "text-destructive" : "ink-faint"
+                  }`}
+                  data-testid={
+                    refreshFailed ? "agent-settings-refresh-error" : undefined
+                  }
+                  role={refreshFailed ? "alert" : undefined}
+                >
+                  {" — "}
+                  {refreshNote}
+                </span>
+              )}
+            </span>
+            {pickerSource === "catalog" ? (
+              <ToolButton
+                aria-label="Force-refresh the model catalog"
+                data-testid="agent-settings-refresh-catalog"
+                disabled={catalogRefresh.isPending}
+                onClick={handleRefreshCatalog}
+                size="sm"
+              >
+                <RefreshCwIcon aria-hidden="true" />
+                Refresh
+              </ToolButton>
+            ) : (
+              <ToolButton
+                aria-label="Re-fetch the endpoint's model list"
+                data-testid="agent-settings-refetch-endpoint"
+                onClick={handleRefetchEndpoint}
+                size="sm"
+              >
+                <RefreshCwIcon aria-hidden="true" />
+                Re-fetch
+              </ToolButton>
+            )}
+          </div>
+        )}
+
         <settingsForm.Form
           aria-label="Agent settings"
-          className="space-y-3"
           data-testid="agent-settings-form"
         />
 
         {applyError === null ? null : (
           <p
-            className="text-destructive text-xs"
+            className="text-ui text-destructive"
             data-testid="agent-settings-apply-error"
             role="alert"
           >
@@ -441,7 +556,7 @@ export function AgentSettingsSheet({
           </p>
         )}
 
-        <p className="text-muted-foreground text-[11px] leading-snug">
+        <p className="text-micro ink-faint leading-snug">
           {MODELS_DEV_ATTRIBUTION}
         </p>
       </DialogContent>

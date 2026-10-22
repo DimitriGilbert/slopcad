@@ -80,6 +80,17 @@ vi.mock("@/utils/trpc", () => ({
   }),
 }));
 
+// cmdk observes the list's size with a ResizeObserver and scrolls the
+// highlighted item into view, neither of which jsdom implements (the
+// cad-command-menu spec stubs them the same way).
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+window.ResizeObserver = ResizeObserverStub;
+Element.prototype.scrollIntoView = (): void => {};
+
 afterEach(cleanup);
 
 /** A configured openai agent with keys stored for two providers. */
@@ -152,25 +163,25 @@ function valueOf(field: Element): string {
 }
 
 /**
- * Commits the model option whose label matches through the autocomplete:
- * focus opens the dropdown (minChars is 0), typing re-queries, and the
- * option button's click commits the field value.
+ * Commits the model option whose label matches through the command
+ * picker: the trigger opens the popover, the search input narrows the
+ * family groups, and the item's click commits the field value.
  */
 async function pickModelOption(search: string, optionLabel: string) {
-  const input = screen.getByLabelText("Model");
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error("the Model field is not an input");
-  }
-  fireEvent.focus(input);
+  const trigger = screen.getByLabelText("Model");
+  fireEvent.click(trigger);
+  const input = await screen.findByPlaceholderText("Search models…");
   fireEvent.change(input, { target: { value: search } });
-  // The find window is sized for the LOADED gate: the autocomplete's
-  // 200 ms debounce plus its async resolve ran past findByText's 1 s
-  // default once under `pnpm run verify`'s turbo fan-out (the whole
-  // test 3.1 s loaded vs 0.6 s serial — contention, not the sheet),
-  // so the window carries the same ×5-plus margin, not a guess.
-  const option = await screen.findByText(optionLabel, undefined, {
-    timeout: 10_000,
-  });
+  // The find window is sized for the LOADED gate: the popover mount plus
+  // the catalog query resolve ran past findByText's 1 s default once
+  // under `pnpm run verify`'s turbo fan-out, so the window carries the
+  // same ×5-plus margin, not a guess. `option` queries the cmdk item —
+  // its family heading can share the label text.
+  const option = await screen.findByRole(
+    "option",
+    { name: new RegExp(optionLabel) },
+    { timeout: 10_000 },
+  );
   fireEvent.click(option);
 }
 
