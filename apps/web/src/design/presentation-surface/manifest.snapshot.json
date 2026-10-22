@@ -472,7 +472,7 @@
       "origin": "jsx",
       "values": [],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/complete-workbench.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
         "packages/ui/src/components/cad/cad-model-tree.tsx",
         "packages/ui/src/components/cad/cad-parameter-manager.tsx",
         "packages/ui/src/components/formedible/fields/combobox-field.tsx",
@@ -491,6 +491,12 @@
           "value": "listbox",
           "files": [
             "packages/ui/src/components/formedible/fields/combobox-field.tsx"
+          ]
+        },
+        {
+          "value": "menu",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-flyout.tsx"
           ]
         }
       ],
@@ -511,6 +517,7 @@
             "apps/web/src/cad-workbench/hole-ghost.tsx",
             "apps/web/src/cad-workbench/topology-pick-panel.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
             "apps/web/src/component-preview/ComponentPreviewPage.tsx",
             "apps/web/src/components/header.tsx",
             "apps/web/src/components/scheme-picker.tsx",
@@ -537,8 +544,10 @@
             "packages/ui/src/components/cad/cad-sketch-canvas.tsx",
             "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
+            "packages/ui/src/components/cad/cad-toolbar.tsx",
             "packages/ui/src/components/cockpit/property-row.tsx",
             "packages/ui/src/components/cockpit/tool-button.tsx",
+            "packages/ui/src/components/cockpit/tool-flyout.tsx",
             "packages/ui/src/components/formedible/fields/array-field.tsx",
             "packages/ui/src/components/formedible/fields/expression-number-field.tsx",
             "packages/ui/src/components/formedible/fields/field-wrapper.tsx",
@@ -603,6 +612,12 @@
       "origin": "jsx",
       "values": [
         {
+          "value": "Control+K",
+          "files": [
+            "apps/web/src/cad-workbench/complete-workbench.tsx"
+          ]
+        },
+        {
           "value": "s",
           "files": [
             "apps/web/src/design/DesignSystemPage.tsx"
@@ -611,7 +626,8 @@
       ],
       "dynamicFiles": [
         "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
-        "packages/ui/src/components/cad/cad-toolbar.tsx"
+        "packages/ui/src/components/cad/cad-toolbar.tsx",
+        "packages/ui/src/components/cockpit/tool-flyout.tsx"
       ]
     },
     {
@@ -747,7 +763,7 @@
         {
           "value": "Document",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
           ]
         },
         {
@@ -778,6 +794,12 @@
           "value": "Explode factor",
           "files": [
             "apps/web/src/cad-workbench/assembly-motion-workbench.tsx"
+          ]
+        },
+        {
+          "value": "Export",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -834,8 +856,13 @@
           "value": "History",
           "files": [
             "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx",
-            "apps/web/src/cad-workbench/CadWorkbenchPage.tsx",
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/CadWorkbenchPage.tsx"
+          ]
+        },
+        {
+          "value": "Import",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -969,7 +996,7 @@
         {
           "value": "Redo",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -1063,12 +1090,6 @@
           ]
         },
         {
-          "value": "Sketch",
-          "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
-          ]
-        },
-        {
           "value": "Sketch history",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx"
@@ -1137,13 +1158,13 @@
         {
           "value": "Toggle model tree",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "Toggle panels",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -1155,7 +1176,7 @@
         {
           "value": "Undo",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -1190,12 +1211,12 @@
         }
       ],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/complete-workbench.tsx",
         "apps/web/src/cad-workbench/drawing-workbench.tsx",
         "apps/web/src/cad-workbench/feature-forms.tsx",
         "apps/web/src/cad-workbench/feature-timeline-strip.tsx",
         "apps/web/src/cad-workbench/topology-pick-panel.tsx",
         "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
         "apps/web/src/components/theme-toggle.tsx",
         "apps/web/src/sim-workbench/SimWorkbenchPage.tsx",
         "apps/web/src/sim-workbench/engine-chart.tsx",
@@ -1211,6 +1232,9 @@
         "packages/ui/src/components/cad/cad-toolbar.tsx",
         "packages/ui/src/components/cad/cad-viewport.tsx",
         "packages/ui/src/components/cockpit/tool-button.tsx",
+        "packages/ui/src/components/cockpit/tool-flyout.tsx",
+        "packages/ui/src/components/cockpit/tool-options-bar.tsx",
+        "packages/ui/src/components/cockpit/tool-strip.tsx",
         "packages/ui/src/components/formedible/fields/array-field.tsx",
         "packages/ui/src/components/formedible/fields/expression-number-field.tsx",
         "packages/ui/src/components/formedible/fields/multi-select-field.tsx",
@@ -1330,6 +1354,12 @@
       "origin": "jsx",
       "values": [
         {
+          "value": "horizontal",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-strip.tsx"
+          ]
+        },
+        {
           "value": "vertical",
           "files": [
             "apps/web/src/cad-workbench/right-sidebar.tsx"
@@ -1361,6 +1391,8 @@
         "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
         "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
         "packages/ui/src/components/cad/cad-toolbar.tsx",
+        "packages/ui/src/components/cockpit/tool-flyout.tsx",
+        "packages/ui/src/components/cockpit/tool-options-bar.tsx",
         "packages/ui/src/components/formedible/fields/password-field.tsx"
       ]
     },
@@ -3129,6 +3161,21 @@
       ]
     },
     {
+      "attribute": "data-faced",
+      "origin": "jsx",
+      "values": [
+        {
+          "value": "",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-flyout.tsx"
+          ]
+        }
+      ],
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/tool-flyout.tsx"
+      ]
+    },
+    {
       "attribute": "data-feature-dialog-kind",
       "origin": "jsx",
       "values": [
@@ -4189,13 +4236,13 @@
         {
           "value": "settled",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
           ]
         },
         {
           "value": "waiting",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
           ]
         }
       ],
@@ -6222,9 +6269,39 @@
           ]
         },
         {
+          "value": "tool-flyout",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-flyout.tsx"
+          ]
+        },
+        {
+          "value": "tool-flyout-trigger",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-flyout.tsx"
+          ]
+        },
+        {
           "value": "tool-group",
           "files": [
             "packages/ui/src/components/cockpit/tool-button.tsx"
+          ]
+        },
+        {
+          "value": "tool-options-bar",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-options-bar.tsx"
+          ]
+        },
+        {
+          "value": "tool-strip",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "tool-strip-overflow",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-strip.tsx"
           ]
         },
         {
@@ -6249,6 +6326,12 @@
           "value": "tooltip-trigger",
           "files": [
             "packages/ui/src/components/tooltip.tsx"
+          ]
+        },
+        {
+          "value": "workbench-status-band",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
           ]
         }
       ],
@@ -6701,7 +6784,7 @@
         {
           "value": "complete-boolean",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -6717,21 +6800,27 @@
           ]
         },
         {
+          "value": "complete-create-family",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
           "value": "complete-datum",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-draft",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-export",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -6743,103 +6832,127 @@
         {
           "value": "complete-helix",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-hole",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-hole-spec",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-import",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-loft",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-mirror",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-mode-toggle",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "complete-modify-family",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-move-body",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-pattern",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "complete-pattern-family",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-pattern-path",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-rib",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-scale",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "complete-sketch-family",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-sketch-on-face",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-split",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "complete-surface-family",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-sweep",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-thicken",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "complete-thread",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -7463,6 +7576,18 @@
           ]
         },
         {
+          "value": "view-front",
+          "files": [
+            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
+          ]
+        },
+        {
+          "value": "view-iso",
+          "files": [
+            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
+          ]
+        },
+        {
           "value": "view-look-at",
           "files": [
             "apps/web/src/cad-workbench/viewport-view-tools.tsx"
@@ -7476,6 +7601,18 @@
         },
         {
           "value": "view-reset",
+          "files": [
+            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
+          ]
+        },
+        {
+          "value": "view-right",
+          "files": [
+            "apps/web/src/cad-workbench/viewport-view-tools.tsx"
+          ]
+        },
+        {
+          "value": "view-top",
           "files": [
             "apps/web/src/cad-workbench/viewport-view-tools.tsx"
           ]
@@ -7826,13 +7963,13 @@
         {
           "value": "workbench-toggle-panels",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
           "value": "workbench-toggle-tree",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         },
         {
@@ -7888,6 +8025,7 @@
         "apps/web/src/agent/chat/agent-settings.tsx",
         "apps/web/src/cad-workbench/interference-workbench.tsx",
         "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
         "apps/web/src/components/scheme-picker.tsx",
         "apps/web/src/design/DesignSystemPage.tsx",
         "apps/web/src/docs-app/DocsPage.tsx",
@@ -7895,7 +8033,8 @@
         "apps/web/src/viewer/share-variant-menu.tsx",
         "packages/ui/src/components/cad/cad-io-dialog.tsx",
         "packages/ui/src/components/cad/cad-model-tree.tsx",
-        "packages/ui/src/components/cad/cad-property-panel.tsx"
+        "packages/ui/src/components/cad/cad-property-panel.tsx",
+        "packages/ui/src/components/cockpit/tool-flyout.tsx"
       ]
     },
     {
@@ -7980,6 +8119,14 @@
       ]
     },
     {
+      "attribute": "data-tool-family",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/tool-flyout.tsx"
+      ]
+    },
+    {
       "attribute": "data-tool-id",
       "origin": "jsx",
       "values": [
@@ -8000,7 +8147,24 @@
         "apps/web/src/cad-workbench/complete-workbench.tsx",
         "apps/web/src/render-fixture/RenderFixturePage.tsx",
         "apps/web/src/ui-viewport-fixture/UiViewportFixturePage.tsx",
-        "packages/ui/src/components/cad/cad-toolbar.tsx"
+        "packages/ui/src/components/cad/cad-toolbar.tsx",
+        "packages/ui/src/components/cockpit/tool-flyout.tsx"
+      ]
+    },
+    {
+      "attribute": "data-tool-option",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/tool-options-bar.tsx"
+      ]
+    },
+    {
+      "attribute": "data-tool-options",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/tool-options-bar.tsx"
       ]
     },
     {
@@ -8253,6 +8417,25 @@
       ]
     },
     {
+      "attribute": "data-zone",
+      "origin": "jsx",
+      "values": [
+        {
+          "value": "bottom",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx"
+          ]
+        },
+        {
+          "value": "top",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        }
+      ],
+      "dynamicFiles": []
+    },
+    {
       "attribute": "role",
       "origin": "jsx",
       "values": [
@@ -8316,11 +8499,12 @@
             "apps/web/src/cad-workbench/complete-workbench.tsx",
             "apps/web/src/cad-workbench/right-sidebar.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-status-band.tsx",
             "packages/ui/src/components/cad/cad-model-tree.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
-            "packages/ui/src/components/cad/cad-toolbar.tsx",
             "packages/ui/src/components/cad/cad-viewport.tsx",
             "packages/ui/src/components/cockpit/tool-button.tsx",
+            "packages/ui/src/components/cockpit/tool-options-bar.tsx",
             "packages/ui/src/components/field.tsx",
             "packages/ui/src/components/input-group.tsx"
           ]
@@ -8353,13 +8537,15 @@
         {
           "value": "menu",
           "files": [
-            "packages/ui/src/components/cad/cad-model-tree.tsx"
+            "packages/ui/src/components/cad/cad-model-tree.tsx",
+            "packages/ui/src/components/cockpit/tool-flyout.tsx"
           ]
         },
         {
           "value": "menuitem",
           "files": [
-            "packages/ui/src/components/cad/cad-model-tree.tsx"
+            "packages/ui/src/components/cad/cad-model-tree.tsx",
+            "packages/ui/src/components/cockpit/tool-flyout.tsx"
           ]
         },
         {
@@ -8433,6 +8619,12 @@
           "value": "the frame",
           "files": [
             "apps/web/src/design/DesignSystemPage.tsx"
+          ]
+        },
+        {
+          "value": "toolbar",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-strip.tsx"
           ]
         },
         {

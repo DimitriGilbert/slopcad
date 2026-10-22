@@ -8,11 +8,20 @@
  * reading pixels. This module turns one TS/TSX source file into the set of
  * such handles it declares.
  *
- * Two declaration sites count:
+ * Three declaration sites count:
  *
  *   1. JSX attributes — `<button aria-label="Undo" data-testid="undo" />`.
  *   2. Imperative DOM writes — `root.setAttribute("data-settled", "3")`,
  *      which several fixture pages use to publish worker counters.
+ *   3. TESTID-BEARING PROPS — a prop or object property whose name ends in
+ *      `testid` (`testId`, `triggerTestId`), which a descriptor-driven
+ *      primitive forwards verbatim onto its own `data-testid`. The cockpit's
+ *      `ToolFlyout` renders a tool family from a typed item list, so the
+ *      family members' testids are declared there rather than as JSX
+ *      attributes; without this site a verb folded into a flyout would
+ *      silently vanish from the surface inventory while still being
+ *      published to the DOM — exactly the drift this manifest exists to
+ *      catch.
  *
  * Values are harvested statically where that is honest: string/boolean/
  * numeric literals, and the literal branches of a conditional or a logical
@@ -41,6 +50,16 @@ export interface SurfaceAttributeOccurrence {
 
 /** `aria-*`, `data-*` and `role` are the surface; everything else is style. */
 const SURFACE_ATTRIBUTE = /^(?:aria-[a-z][a-z-]*|data-[a-z][a-z0-9-]*|role)$/;
+
+/**
+ * A prop/property name that carries a testid a primitive forwards onto its
+ * own `data-testid` (`testId`, `triggerTestId`, `faceTestId`, …). Matched
+ * case-insensitively on the suffix so the naming stays the TS convention.
+ */
+const TESTID_BEARING_NAME = /testid$/;
+
+/** The attribute a testid-bearing prop ultimately declares. */
+const TESTID_ATTRIBUTE = "data-testid";
 
 /** The DOM methods that DECLARE an attribute (reads are not a surface). */
 const WRITER_METHODS = new Set([
@@ -138,7 +157,20 @@ function surfaceAttributeName(name: ts.JsxAttributeName): string | null {
     ? `${name.namespace.text}:${name.name.text}`
     : name.text;
   const lowered = text.toLowerCase();
-  return SURFACE_ATTRIBUTE.test(lowered) ? lowered : null;
+  if (SURFACE_ATTRIBUTE.test(lowered)) return lowered;
+  return TESTID_BEARING_NAME.test(lowered) ? TESTID_ATTRIBUTE : null;
+}
+
+/**
+ * The attribute an object-literal property declares — only testid-bearing
+ * names count here. A descriptor's `label` or `description` is prose the
+ * component chooses how to render; its `testId` is a handle, verbatim.
+ */
+function propertyTestIdName(name: ts.PropertyName): string | null {
+  if (!ts.isIdentifier(name) && !ts.isStringLiteralLike(name)) return null;
+  return TESTID_BEARING_NAME.test(name.text.toLowerCase())
+    ? TESTID_ATTRIBUTE
+    : null;
 }
 
 /** The attribute name a `setAttribute`-family call targets, or null. */
@@ -191,6 +223,11 @@ export function extractSurfaceAttributes(
       const attribute = surfaceAttributeName(node.name);
       if (attribute !== null) {
         record(attribute, "jsx", harvestJsxInitializer(node.initializer));
+      }
+    } else if (ts.isPropertyAssignment(node)) {
+      const attribute = propertyTestIdName(node.name);
+      if (attribute !== null) {
+        record(attribute, "jsx", harvestValues(node.initializer));
       }
     } else if (ts.isCallExpression(node)) {
       const attribute = writerAttributeName(node);

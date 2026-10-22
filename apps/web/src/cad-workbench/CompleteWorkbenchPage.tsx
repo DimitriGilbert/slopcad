@@ -783,9 +783,11 @@ function CompleteWorkbenchBody({
         // strip keeps its surface ids through the exported default): a
         // page-level bar row would consume layout height and shift the
         // sketch canvas the tutorial driver maps workplane clicks onto.
+        // The status BAND owns the rule and the surface now, so the slot's
+        // node renders transparent and borderless inside it.
         statusBar: ({ engine }) => (
-          <div className="border-border flex items-center border-t">
-            <CompleteWorkbenchStatusBar className="min-w-0 flex-1 border-t-0" />
+          <div className="flex min-w-0 flex-1 items-center">
+            <CompleteWorkbenchStatusBar className="min-w-0 flex-1 border-t-0 bg-transparent px-0" />
             <WorkbenchShareBar engine={engine} />
           </div>
         ),

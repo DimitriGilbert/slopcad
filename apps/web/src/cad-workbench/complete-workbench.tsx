@@ -68,18 +68,7 @@ import {
   withBodyAppearances,
 } from "@slopcad/cad-core";
 import { lightRigById } from "@slopcad/cad-r3f";
-import {
-  Command,
-  Download,
-  PanelLeft,
-  PanelRight,
-  PencilLine,
-  Redo2,
-  Undo2,
-  Upload,
-  X,
-} from "lucide-react";
-import { Button } from "@slopcad/ui/components/button";
+import { Command, PencilLine, X } from "lucide-react";
 import {
   CadCommandMenu,
   type CadCommandDescriptor,
@@ -112,6 +101,7 @@ import {
   ToolButton,
   ToolGroup,
 } from "@slopcad/ui/components/cockpit/tool-button";
+import { ToolOptionsBar } from "@slopcad/ui/components/cockpit/tool-options-bar";
 import type { RenderCamera, RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CurveAuthoring } from "./curves";
@@ -129,6 +119,13 @@ import { completionJson } from "../render-fixture/fixture-session";
 import { createAgentChatCommands } from "../agent/chat/chat-commands";
 import { useAgentChatView } from "../agent/chat/view-state";
 import { WorkbenchRightSidebar } from "./right-sidebar";
+import { describeArmedTool } from "./tool-options";
+import { WorkbenchStatusBand } from "./zones/workbench-status-band";
+import {
+  WorkbenchToolStrip,
+  type WorkbenchStripAvailability,
+  type WorkbenchStripIo,
+} from "./zones/workbench-tool-strip";
 import {
   CAD_FEATURE_FORM_LABELS,
   CURVE_FORM_LABELS,
@@ -297,7 +294,7 @@ export interface CadWorkbenchSlots {
    * unchanged.
    */
   readonly bar?: CadWorkbenchSlot;
-  /** The command row's tool strip. */
+  /** The TOP zone's tool cluster (the strip's first group). */
   readonly toolbar?: CadWorkbenchSlot;
   /** The feature band's history timeline (full width, below the workspace). */
   readonly historyTimeline?: CadWorkbenchSlot;
@@ -313,7 +310,12 @@ export interface CadWorkbenchSlots {
   readonly parameterPanel?: CadWorkbenchSlot;
   /** The Phase 57 configuration surface (switcher, table, create, CSV). */
   readonly configurationPanel?: CadWorkbenchSlot;
-  /** The bottom status bar. */
+  /**
+   * The status band's content. The BAND (`WorkbenchStatusBand`) owns the
+   * zone's top rule, surface and the settle lamp, so a node supplied here
+   * renders transparent and borderless inside it — a slot that draws its
+   * own band chrome doubles the frame's bottom rule.
+   */
   readonly statusBar?: CadWorkbenchSlot;
   /** The import/export dialogs (portal-mounted). */
   readonly ioDialogs?: CadWorkbenchSlot;
@@ -368,14 +370,6 @@ export interface CompleteCadWorkbenchProps {
   /** The root element id (the machine surface's anchor). */
   readonly rootId?: string;
 }
-
-/** Labels of the composition's own chrome (non-component strings). */
-const LABELS = {
-  commandMenuTrigger: "Commands",
-  commandMenuHint: "Ctrl+K",
-  import: "Import",
-  export: "Export",
-} as const;
 
 /**
  * The primitive verbs' search keywords: the kind's own name plus the
@@ -1933,23 +1927,22 @@ export function CompleteCadWorkbench({
 
   const defaultCommandMenu = (
     <>
-      <Button
+      {/* The palette's trigger is a strip control like any other: the mark
+          carries it at every width, the accessible name is unchanged, and
+          the binding is published as `aria-keyshortcuts` instead of as a
+          key cap the row then had to hide below `xl`. */}
+      <ToolButton
+        aria-keyshortcuts="Control+K"
         aria-label="Open the command menu (Ctrl+K)"
         data-testid="complete-command-menu-trigger"
         onClick={() => {
           setCommandMenuOpen(true);
         }}
-        size="xs"
+        size="icon"
         title="Open the command menu (Ctrl+K)"
-        type="button"
-        variant="outline"
       >
-        {/* Below `xl` the row sheds labels before it ever clips a control:
-            the trigger collapses to its mark, the hint lives in the title. */}
-        <Command aria-hidden="true" className="xl:hidden" />
-        <span className="max-xl:hidden">{LABELS.commandMenuTrigger}</span>
-        <KeyCap className="max-xl:hidden">{LABELS.commandMenuHint}</KeyCap>
-      </Button>
+        <Command aria-hidden="true" />
+      </ToolButton>
       <CadCommandMenu
         commands={commands}
         onOpenChange={setCommandMenuOpen}
@@ -2460,7 +2453,12 @@ export function CompleteCadWorkbench({
     />
   );
 
-  const defaultStatusBar = <CompleteWorkbenchStatusBar />;
+  // The band owns the bottom rule and the surface, so the strip inside it
+  // renders transparent and borderless (the contract documented on the
+  // `statusBar` slot).
+  const defaultStatusBar = (
+    <CompleteWorkbenchStatusBar className="min-w-0 flex-1 border-t-0 bg-transparent px-0" />
+  );
 
   const hasIo = io !== undefined;
   const defaultIoDialogs = !hasIo ? null : (
@@ -2505,6 +2503,47 @@ export function CompleteCadWorkbench({
     slots.configurationPanel?.(context) ?? defaultConfigurationPanel;
   const statusBar = slots.statusBar?.(context) ?? defaultStatusBar;
   const ioDialogs = slots.ioDialogs?.(context) ?? defaultIoDialogs;
+
+  // -- The TOP zones' inputs ------------------------------------------------
+
+  // The document facts every strip verb's enablement reads. The strip
+  // states each verb's precondition in its own title; the composition only
+  // says what is true of the document.
+  const stripAvailability: WorkbenchStripAvailability = {
+    canAuthorSketchFeatures,
+    bodyCount: featureProducedBodies.length,
+    datumPlaneCount: datumPlaneOptions.length,
+    hasExtrudeBase,
+    hasFaceSelection,
+    hasQuickHoleBase: holeBase !== undefined,
+    sheetCount: sheetOptions.length,
+    sketchCount: sketchOptions.length,
+  };
+
+  // The file cluster exists only when the host wired adapters — the strip
+  // never pretends to exchange files it has none for.
+  const stripIo: WorkbenchStripIo | null = !hasIo
+    ? null
+    : {
+        canExport: applied !== null,
+        exportTriggerRef,
+        importTriggerRef,
+        onExport: () => {
+          setExportDialogOpen(true);
+        },
+        onImport: () => {
+          setImportDialogOpen(true);
+        },
+      };
+
+  // TOP′: the armed tool's options, or null while nothing is armed.
+  const armedToolOptions = describeArmedTool({
+    onCancel: toolsApi.cancel,
+    onClearSelection: selectionApi.clear,
+    phase: toolsApi.phase,
+    selectionCount: selectionApi.selected.length,
+    toolId: toolsApi.activeToolId,
+  });
 
   // The measurement readouts (the same engine derivations the Phase 15
   // page shows; see ./measurement-section).
@@ -2602,540 +2641,45 @@ export function CompleteCadWorkbench({
       {barNode === undefined ? null : (
         <div className="shrink-0 border-b border-rule bg-chrome">{barNode}</div>
       )}
-      {/* The command row, grouped like a machine headstock: the document
-          plate (what this document IS, live), the tool group, then the
-          pinned terminal actions — history, the command menu, and the
-          file/mode verbs — separated by real group dividers. The feature
-          timeline is NOT here: it owns its own full-width band below the
-          workspace (the silhouette CAD engineers already trust), so the
-          chain never competes with this row for pixels and never clips a
-          control at any width. Below the dock breakpoint the two drawer
-          toggles appear at the row's ends. In sketch mode it yields to
-          the sketch editor's own command row; the model surfaces stay
-          MOUNTED but hidden so the session's surface writer keeps their
-          ids. */}
-      <div
-        className={`h-(--appbar-h) shrink-0 items-center gap-(--gap-tight) border-b border-rule bg-chrome pr-2 ${
-          mode === "sketch" ? "hidden" : "flex"
-        }`}
-      >
-        {/* The drawer toggles (below xl only; display-none keeps them out
-            of the tab order once the docks are inline). */}
-        <Button
-          aria-label="Toggle model tree"
-          aria-expanded={treeDrawerOpen}
-          className="xl:hidden"
-          data-testid="workbench-toggle-tree"
-          onClick={() => {
-            setPanelsDrawerOpen(false);
-            setTreeDrawerOpen((open) => !open);
-          }}
-          size="icon-xs"
-          title="Toggle the model tree dock"
-          type="button"
-          variant="ghost"
-        >
-          <PanelLeft />
-        </Button>
-        {/* The document plate: scene, extents, feature count — the row's
-            identity block, engraved-plate style. */}
-        <div
-          aria-label="Document"
-          className="flex h-full shrink-0 items-center gap-2.5 pr-2 pl-1"
-          role="group"
-        >
-          <span
-            aria-hidden="true"
-            className={`size-1.5 shrink-0 rounded-full ${
-              applied === null
-                ? "bg-signal motion-safe:animate-pulse"
-                : "bg-status-ok"
-            }`}
-          />
-          {/* The scene kind is DATA — the document's own name for what is
-              on the stage — so it is instrument ink, not the signal. In
-              amber it was a permanent accent in the app bar competing with
-              the armed tool two groups to its right. */}
-          <span className="font-mono text-data text-ink tabular">
-            {showingPreview ? "import" : engine.activeScene}
-          </span>
-          <span className="hidden font-mono text-data text-ink-dim tabular 2xl:inline">
-            {applied === null
-              ? "computing…"
-              : formatBoundsExtents(applied.state.measurement.bounds)}
-          </span>
-          <span className="hidden font-mono text-data text-ink-dim tabular xl:inline">
-            {timeline === null ? "" : `${String(timeline.length)} features`}
-          </span>
-        </div>
-        <div aria-hidden="true" className="h-5 w-px shrink-0 bg-rule" />
-        {toolbar}
-        <div aria-hidden="true" className="h-5 w-px shrink-0 bg-rule" />
-        <div
-          aria-label="History"
-          className="flex shrink-0 items-center gap-0.5"
-          role="group"
-        >
-          <Button
-            aria-label="Undo"
-            disabled={!historyApi.canUndo}
-            onClick={() => {
-              historyApi.undo();
-            }}
-            size="icon-xs"
-            title="Undo (the document history's cursor step)"
-            type="button"
-            variant="ghost"
-          >
-            <Undo2 />
-          </Button>
-          <Button
-            aria-label="Redo"
-            disabled={!historyApi.canRedo}
-            onClick={() => {
-              historyApi.redo();
-            }}
-            size="icon-xs"
-            title="Redo (the document history's cursor step)"
-            type="button"
-            variant="ghost"
-          >
-            <Redo2 />
-          </Button>
-        </div>
-        {commandMenu}
-        {!hasIo ? null : (
-          <>
-            <Button
-              aria-label={LABELS.import}
-              data-testid="complete-import"
-              onClick={() => {
-                setImportDialogOpen(true);
-              }}
-              ref={importTriggerRef}
-              size="xs"
-              title="Import model files."
-              type="button"
-              variant="outline"
-            >
-              <Upload aria-hidden="true" className="xl:hidden" />
-              <span className="max-xl:hidden">{LABELS.import}</span>
-            </Button>
-            <Button
-              aria-label={LABELS.export}
-              data-testid="complete-export"
-              disabled={applied === null}
-              onClick={() => {
-                setExportDialogOpen(true);
-              }}
-              ref={exportTriggerRef}
-              size="xs"
-              title={
-                applied === null
-                  ? "The scene settles first; nothing is exportable before that."
-                  : "Export the settled model geometry."
-              }
-              type="button"
-              variant="outline"
-            >
-              <Download aria-hidden="true" className="xl:hidden" />
-              <span className="max-xl:hidden">{LABELS.export}</span>
-            </Button>
-          </>
-        )}
-        {/* The hole verb is contextual (it needs an extrusion to cut), so
-            below `lg` it yields its row width entirely — it stays in the
-            command menu and returns with the full row. */}
-        <Button
-          className="max-xl:hidden"
-          data-testid="complete-hole"
-          disabled={holeBase === undefined}
-          onClick={handleHole}
-          size="xs"
-          title={
-            holeBase === undefined
-              ? "Sketch and extrude a profile first; a hole cuts an existing solid."
-              : "Cut a hole into the latest extrusion; edit its five parameters in the panel."
-          }
-          type="button"
-          variant="outline"
-        >
-          Hole
-        </Button>
-        {/* The Phase 42 structured hole verb: the hole dialog (type,
-            counterbore/countersink/taper/thread spec, sketch-point
-            positions, preview ghost) — the quick Hole button's sibling.
-            The full verb row with every verb present measures ~1745 px
-            (measured at 1800 px, scene settled), so below 1800 px the two
-            widest contextual verbs — this one and Sketch on face — yield
-            their width entirely and the extruded row fits the 1600 px
-            band with ~45 px slack; the command menu keeps both dialogs
-            reachable everywhere (the e2e drives that path). */}
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-hole-spec"
-          disabled={!hasExtrudeBase}
-          onClick={() => {
-            openFeatureDialog("hole");
-          }}
-          size="xs"
-          title={
-            hasExtrudeBase
-              ? "Open the hole dialog: type, dimensions, thread spec, and positions (one feature, many holes)."
-              : "Sketch and extrude a profile first; a hole cuts an existing solid."
-          }
-          type="button"
-          variant="outline"
-        >
-          Hole spec…
-        </Button>
-        {/* The Phase 38 feature verbs: sweep and loft author from the
-            document's SAVED sketches (at least two), so the buttons state
-            their enablement condition in the title instead of pretending. */}
-        <Button
-          className="max-xl:hidden"
-          data-testid="complete-sweep"
-          disabled={!canAuthorSketchFeatures}
-          onClick={() => {
-            openFeatureDialog("sweep");
-          }}
-          size="xs"
-          title={
-            canAuthorSketchFeatures
-              ? "Sweep a saved profile sketch along a saved path sketch."
-              : "Save two sketches first (draw one, press Save, repeat); sweep picks its profile and path from the saved pool."
-          }
-          type="button"
-          variant="outline"
-        >
-          Sweep
-        </Button>
-        <Button
-          className="max-xl:hidden"
-          data-testid="complete-loft"
-          disabled={!canAuthorSketchFeatures}
-          onClick={() => {
-            openFeatureDialog("loft");
-          }}
-          size="xs"
-          title={
-            canAuthorSketchFeatures
-              ? "Loft two or more saved section sketches, in order, at their stations."
-              : "Save two sketches first (draw one, press Save, repeat); loft picks its ordered sections from the saved pool."
-          }
-          type="button"
-          variant="outline"
-        >
-          Loft
-        </Button>{" "}
-        {/* The Phase 40 feature verbs: helix authors from ONE saved
-            meridian sketch; thread cuts the last extrusion with a picked
-            ISO specification. */}
-        <Button
-          className="max-xl:hidden"
-          data-testid="complete-helix"
-          disabled={sketchOptions.length < 1}
-          onClick={() => {
-            openFeatureDialog("helix");
-          }}
-          size="xs"
-          title={
-            sketchOptions.length >= 1
-              ? "Sweep a saved profile sketch along an analytic helix: radius, pitch, turns, handedness, taper."
-              : "Save a sketch first (draw one and press Save); the helix picks its meridian profile from the saved pool."
-          }
-          type="button"
-          variant="outline"
-        >
-          Helix
-        </Button>
-        <Button
-          className="max-xl:hidden"
-          data-testid="complete-thread"
-          disabled={!hasExtrudeBase}
-          onClick={() => {
-            openFeatureDialog("thread");
-          }}
-          size="xs"
-          title={
-            hasExtrudeBase
-              ? "Cut an ISO metric thread on the latest extrusion: pick a designation, mode, and length."
-              : "Sketch and extrude a profile first; a thread cuts an existing solid."
-          }
-          type="button"
-          variant="outline"
-        >
-          Thread
-        </Button>
-        {/* The Phase 41 feature verbs: draft re-extrudes a saved sketch
-            with a wall-angle taper; rib authors from a saved
-            cross-section sketch and needs an extrusion to grow; scale and
-            thicken act on the latest extrusion; split needs a datum plane
-            and an extrusion. */}
-        <Button
-          className="max-2xl:hidden"
-          data-testid="complete-draft"
-          disabled={sketchOptions.length < 1}
-          onClick={() => {
-            openFeatureDialog("draft");
-          }}
-          size="xs"
-          title={
-            sketchOptions.length >= 1
-              ? "Extrude a saved sketch with a draft taper: the walls lean by the angle away from the sketch plane."
-              : "Save a sketch first (draw one and press Save); the draft picks its profile from the saved pool."
-          }
-          type="button"
-          variant="outline"
-        >
-          Draft
-        </Button>
-        <Button
-          className="max-2xl:hidden"
-          data-testid="complete-rib"
-          disabled={!(sketchOptions.length >= 1 && hasExtrudeBase)}
-          onClick={() => {
-            openFeatureDialog("rib");
-          }}
-          size="xs"
-          title={
-            sketchOptions.length >= 1 && hasExtrudeBase
-              ? "Union a rib: pick a saved cross-section sketch and a thickness; it extrudes symmetrically into the latest extrusion."
-              : "Save a sketch and extrude a profile first; a rib needs a cross-section and a part to grow."
-          }
-          type="button"
-          variant="outline"
-        >
-          Rib
-        </Button>
-        <Button
-          className="max-2xl:hidden"
-          data-testid="complete-scale"
-          disabled={!hasExtrudeBase}
-          onClick={() => {
-            openFeatureDialog("scale");
-          }}
-          size="xs"
-          title={
-            hasExtrudeBase
-              ? "Scale the latest extrusion by one uniform factor about the world origin."
-              : "Extrude a profile first; a scale needs a solid."
-          }
-          type="button"
-          variant="outline"
-        >
-          Scale
-        </Button>
-        <Button
-          className="max-2xl:hidden"
-          data-testid="complete-thicken"
-          disabled={!hasExtrudeBase}
-          onClick={() => {
-            openFeatureDialog("thicken");
-          }}
-          size="xs"
-          title={
-            hasExtrudeBase
-              ? "Hollow the latest extrusion into a closed shell of uniform walls."
-              : "Extrude a profile first; a thicken needs a solid."
-          }
-          type="button"
-          variant="outline"
-        >
-          Thicken
-        </Button>
-        <Button
-          className="max-2xl:hidden"
-          data-testid="complete-split"
-          disabled={!(datumPlaneOptions.length >= 1 && hasExtrudeBase)}
-          onClick={() => {
-            openFeatureDialog("split");
-          }}
-          size="xs"
-          title={
-            datumPlaneOptions.length >= 1 && hasExtrudeBase
-              ? "Split the latest extrusion by a datum plane, keeping one side."
-              : "Create a datum plane and extrude a profile first; a split needs both."
-          }
-          type="button"
-          variant="outline"
-        >
-          Split
-        </Button>
-        {/* The Phase 43 pattern verbs: the editor arrays the last
-            extrusion (asymmetric legs, skip instances), the path pattern
-            distributes it along a saved sketch path, and the mirror
-            reflects it about a datum plane with a merge option. */}
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-pattern"
-          disabled={!hasExtrudeBase}
-          onClick={() => {
-            openFeatureDialog("pattern");
-          }}
-          size="xs"
-          title={
-            hasExtrudeBase
-              ? "Pattern the latest extrusion: one leg per direction with its own count and spacing, instances skippable by ordinal."
-              : "Extrude a profile first; a pattern needs a solid."
-          }
-          type="button"
-          variant="outline"
-        >
-          Pattern
-        </Button>
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-pattern-path"
-          disabled={!(sketchOptions.length >= 1 && hasExtrudeBase)}
-          onClick={() => {
-            openFeatureDialog("patternPath");
-          }}
-          size="xs"
-          title={
-            sketchOptions.length >= 1 && hasExtrudeBase
-              ? "Repeat the latest extrusion along a saved path sketch at an arc-length spacing."
-              : "Save a path sketch and extrude a profile first; a path pattern needs both."
-          }
-          type="button"
-          variant="outline"
-        >
-          Path pattern
-        </Button>
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-mirror"
-          disabled={!(datumPlaneOptions.length >= 1 && hasExtrudeBase)}
-          onClick={() => {
-            openFeatureDialog("mirror");
-          }}
-          size="xs"
-          title={
-            datumPlaneOptions.length >= 1 && hasExtrudeBase
-              ? "Mirror the latest extrusion about a datum plane, standalone or merged with the original."
-              : "Create a datum plane and extrude a profile first; a mirror needs both."
-          }
-          type="button"
-          variant="outline"
-        >
-          Mirror
-        </Button>
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-boolean"
-          disabled={!(featureProducedBodies.length >= 2)}
-          onClick={() => {
-            openFeatureDialog("boolean");
-          }}
-          size="xs"
-          title={
-            featureProducedBodies.length >= 2
-              ? "Combine two bodies: union, subtract, or intersect, with a keep-tool toggle."
-              : "Extrude two profiles first; a boolean needs a target and a tool body."
-          }
-          type="button"
-          variant="outline"
-        >
-          Boolean
-        </Button>
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-move-body"
-          disabled={!hasExtrudeBase}
-          onClick={() => {
-            openFeatureDialog("moveBody");
-          }}
-          size="xs"
-          title={
-            hasExtrudeBase
-              ? "Move the latest extrusion: translate it, optionally rotating about a world axis first."
-              : "Extrude a profile first; a move needs a body."
-          }
-          type="button"
-          variant="outline"
-        >
-          Move
-        </Button>
-        {/* The Phase 49 surface verbs: the sheet family — base sheet,
-            trim, thicken, knit, offset — lives in the COMMAND MENU only.
-            The family is the row's widest contextual group (~314 px
-            together) and every harness width is already spent (the full
-            verb row measures ~1745 px at 1800 px), so no tier shows the
-            family without overflowing the engraved row budget; the menu
-            keeps each verb reachable everywhere (the hole-spec
-            discipline; the e2e drives that path). */}{" "}
-        {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
-            the datum form needs nothing. Both stay in the command menu on
-            narrow rows. Sketch-on-face is the row's widest contextual verb
-            (it needs a prior selection to mean anything), so below 1800 px
-            it yields its width entirely — the same tier as the Hole spec…
-            verb — and the command menu keeps it reachable everywhere (the
-            e2e drives that path). */}
-        <Button
-          className="max-[1799px]:hidden"
-          data-testid="complete-sketch-on-face"
-          disabled={!hasFaceSelection}
-          onClick={sketchOnSelectedFace}
-          size="xs"
-          title={
-            hasFaceSelection
-              ? "Sketch on the selected face: anchors a datum plane to it and boots the sketch editor there."
-              : "Select a face in the viewport first; sketch-on-face anchors to it."
-          }
-          type="button"
-          variant="outline"
-        >
-          Sketch on face
-        </Button>
-        <Button
-          className="max-xl:hidden"
-          data-testid="complete-datum"
-          onClick={() => {
-            openFeatureDialog("datum");
-          }}
-          size="xs"
-          title="Create datum geometry: a plane, an axis, a point, or a coordinate system."
-          type="button"
-          variant="outline"
-        >
-          Datum
-        </Button>
-        {/* THE creation affordance: the one verb that adds geometry. The
-            signal-amber border and mark make it the only tinted control in
-            the row — the eye lands here first (the label stays foreground
-            ink in every scheme; the amber rides border and icon only). */}
-        <Button
-          aria-label="Sketch"
-          className="border-signal/60 hover:bg-signal/10"
-          data-testid="complete-mode-toggle"
-          onClick={() => {
-            setMode("sketch");
-          }}
-          size="xs"
-          title="Start a sketch: draw a profile, then extrude it into a solid."
-          type="button"
-          variant="outline"
-        >
-          <PencilLine aria-hidden="true" className="text-signal" />
-          <span className="max-xl:hidden">Sketch</span>
-        </Button>
-        <Button
-          aria-label="Toggle panels"
-          aria-expanded={panelsDrawerOpen}
-          className="xl:hidden"
-          data-testid="workbench-toggle-panels"
-          onClick={() => {
-            setTreeDrawerOpen(false);
-            setPanelsDrawerOpen((open) => !open);
-          }}
-          size="icon-xs"
-          title="Toggle the properties and parameters dock"
-          type="button"
-          variant="ghost"
-        >
-          <PanelRight />
-        </Button>
-      </div>
+      {/* TOP — the icon tool strip. The nineteen text verbs, the three
+          tiers of width-conditional hiding and the hand-rolled group
+          dividers are gone: the zone owns the strip, and this composition
+          owns only the document facts the verbs read and the operations
+          they run. In sketch mode it yields to the sketch editor's own
+          command row; the model surfaces stay MOUNTED but hidden so the
+          session's surface writer keeps their ids. */}
+      <WorkbenchToolStrip
+        availability={stripAvailability}
+        canRedo={historyApi.canRedo}
+        canUndo={historyApi.canUndo}
+        commandMenu={commandMenu}
+        hidden={mode === "sketch"}
+        io={stripIo}
+        onEnterSketch={() => {
+          setMode("sketch");
+        }}
+        onFeatureDialog={openFeatureDialog}
+        onQuickHole={handleHole}
+        onRedo={historyApi.redo}
+        onSketchOnFace={sketchOnSelectedFace}
+        onToggleTreeDrawer={() => {
+          setPanelsDrawerOpen(false);
+          setTreeDrawerOpen((open) => !open);
+        }}
+        onTogglePanelsDrawer={() => {
+          setTreeDrawerOpen(false);
+          setPanelsDrawerOpen((open) => !open);
+        }}
+        onUndo={historyApi.undo}
+        panelsDrawerOpen={panelsDrawerOpen}
+        toolbar={toolbar}
+        treeDrawerOpen={treeDrawerOpen}
+      />
+      {/* TOP′ — the armed tool's own options strip. Present only while a
+          tool is live, and never in sketch mode (whose strip is step 4's). */}
+      {mode === "sketch" ? null : (
+        <ToolOptionsBar descriptor={armedToolOptions} />
+      )}
       {mode === "sketch" ? (
         <SketchMode
           bootWorkplane={sketchBootWorkplane ?? undefined}
@@ -3233,37 +2777,21 @@ export function CompleteCadWorkbench({
       <div className={mode === "sketch" ? "hidden" : "contents"}>
         {historyTimeline}
       </div>
-      {/* The status frame: the settle lamp rides the status bar's left
-          edge — the settle protocol made glanceable and machine-readable
-          (`data-settle-lamp`). Lit while the rendered pixels agree with
-          the document; a hollow ring while the scene settles or an import
-          preview owns the stage.
-
-          The lit lamp used to be the SIGNAL colour with a dark-register
-          glow, which meant the cockpit carried a permanent amber light in
-          its bottom-left corner for its whole healthy life — the accent
-          spent on a steady state instead of on the armed tool. "Settled"
-          is a status, so the lamp is the status lamp's own green, flat:
-          the cockpit's depth comes from value and rules, never a glow. */}
-      <div className="relative shrink-0 [&_[data-slot='cad-status-bar']]:pl-9">
-        <span
-          className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2"
-          data-settle-lamp={settled ? "settled" : "waiting"}
-          title={
-            settled
-              ? "Scene settled — the rendered pixels agree with the document."
-              : "Scene settling — the rendered pixels are not yet comparable."
-          }
-        >
-          <span
-            aria-hidden="true"
-            className={`block size-2 rounded-full transition-colors duration-(--dur-state) ${
-              settled ? "bg-status-ok" : "border border-ink-faint"
-            }`}
-          />
-        </span>
-        {statusBar}
-      </div>
+      {/* BOTTOM — the status band: the settle lamp as a real StatusDot in
+          normal flow (the `[&_[data-slot='cad-status-bar']]:pl-9`
+          reach-in is deleted), the document plate brought down from the
+          tool strip, and the statusBar slot's node. */}
+      <WorkbenchStatusBand
+        extentsText={
+          applied === null
+            ? null
+            : formatBoundsExtents(applied.state.measurement.bounds)
+        }
+        featureCount={timeline === null ? null : timeline.length}
+        sceneKind={showingPreview ? "import" : engine.activeScene}
+        settled={settled}
+        statusBar={statusBar}
+      />
       {ioDialogs}
       {/* The Phase 38 feature dialog: one kind-switched surface hosting the
           Formedible sweep/loft forms; a structured refusal surfaces verbatim

@@ -93,6 +93,12 @@ export interface ToolFlyoutProps {
   readonly pressedId?: string | null;
   /** The chevron's `data-testid`. */
   readonly triggerTestId?: string;
+  /**
+   * Extends the FACE's classes. The one sanctioned use is marking a
+   * family as the surface's single confirming action (the signal edge on
+   * the sketch family); it is not a styling hook for appearance.
+   */
+  readonly faceClassName?: string;
   /** Extends the pair's container classes. */
   readonly className?: string;
 }
@@ -128,6 +134,7 @@ function faceOf(
 export function ToolFlyout({
   className,
   defaultFacedId,
+  faceClassName,
   facedId,
   items,
   label,
@@ -200,7 +207,7 @@ export function ToolFlyout({
         aria-pressed={
           pressedId === undefined ? undefined : pressedId === face.id
         }
-        className="relative rounded-e-none"
+        className={cn("relative rounded-e-none", faceClassName)}
         data-testid={face.testId}
         data-tool-id={face.id}
         disabled={face.disabled}

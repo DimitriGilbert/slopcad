@@ -27,15 +27,25 @@ import { describe, expect, it } from "vitest";
  * packages (the React integration layer and the R3F renderer), the
  * shadcn-ui `cn` class-merging package (the registry-distribution import
  * the components share with the rest of the primitives), the package's
- * own modules (`@slopcad/ui/*` self-imports and relative paths), and Node
- * builtins. Kernels (`@slopcad/kernel-*`, `@slopcad/cad-kernel*`), worker
+ * own modules (`@slopcad/ui/*` self-imports and relative paths), Node
+ * builtins, and `lucide-react` — the icon set the whole product draws
+ * with. Kernels (`@slopcad/kernel-*`, `@slopcad/cad-kernel*`), worker
  * modules, and even direct three/R3F imports are NOT on the list — the
  * components compose `CadScene`, and a need for anything below it is a
  * boundary decision, not an import.
+ *
+ * `lucide-react` is admitted DELIBERATELY, as that kind of decision: the
+ * cockpit's tool strip is icon-only, so the CAD area needs a tool
+ * iconography (`cad-tool-icons.ts`) keyed by the tool ids it already owns.
+ * An icon set is a leaf presentation dependency — it reaches for nothing,
+ * least of all a kernel — and the alternative (hand-rolled SVG per verb,
+ * as `cad-model-tree`'s palette mark still is) is how a product ends up
+ * with two icon dialects.
  */
 const ALLOWED_IMPORT_SOURCES: ReadonlySet<string> = new Set([
   "react",
   "cn",
+  "lucide-react",
   "@slopcad/cad-react",
   "@slopcad/cad-r3f",
 ]);

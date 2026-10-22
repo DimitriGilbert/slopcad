@@ -51,7 +51,7 @@ describe("the presentation-surface guard", () => {
     const testIds = built.attributes.find(
       (entry) => entry.attribute === "data-testid" && entry.origin === "jsx",
     );
-    expect(testIds?.values.length ?? 0).toBeGreaterThanOrEqual(240);
+    expect(testIds?.values.length ?? 0).toBeGreaterThanOrEqual(257);
     const ariaLabels = built.attributes.find(
       (entry) => entry.attribute === "aria-label" && entry.origin === "jsx",
     );
@@ -123,6 +123,37 @@ describe("the attribute extractor", () => {
       values: [],
       dynamic: true,
     });
+  });
+
+  it("reads a testid a descriptor hands a primitive to forward", () => {
+    // The third declaration site: a tool family is rendered from a typed
+    // item list, so its members' testids are declared as `testId` props and
+    // object properties, not as JSX attributes. Without this the verbs that
+    // folded into flyouts would vanish from the inventory while still being
+    // published to the DOM.
+    const occurrences = extractSurfaceAttributes(
+      "sample.tsx",
+      `const items = [{ id: "hole", testId: "complete-hole", label: "Hole" }];
+       const view = <ToolFlyout items={items} triggerTestId="modify-family" />;`,
+    );
+    expect(occurrences).toEqual([
+      {
+        attribute: "data-testid",
+        origin: "jsx",
+        values: ["complete-hole", "modify-family"],
+        dynamic: false,
+      },
+    ]);
+  });
+
+  it("ignores descriptor prose beside a testid", () => {
+    const occurrences = extractSurfaceAttributes(
+      "sample.tsx",
+      'const item = { label: "Hole", description: "Cut a hole" };',
+    );
+    // A descriptor's prose is the component's to render; only the handle is
+    // a surface declaration.
+    expect(occurrences).toEqual([]);
   });
 
   it("never harvests a string buried in a call argument", () => {
