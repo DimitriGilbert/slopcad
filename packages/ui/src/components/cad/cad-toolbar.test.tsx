@@ -102,8 +102,9 @@ describe("CadToolbar", () => {
     renderInProvider(store);
     const active = toolButton(MEASURE_TOOL_ID);
     expect(active.getAttribute("aria-pressed")).toBe("true");
-    // The pressed variant rides the data-active attribute over the
-    // strip's shared data-[active=true]:bg-accent class.
+    // The pressed appearance rides aria-pressed (the ToolButton
+    // primitive's armed wash + signal edge); data-active republishes the
+    // same truth as a machine-readable state attribute.
     expect(active.getAttribute("data-active")).toBe("true");
     const inactive = toolButton(SELECT_TOOL_ID);
     expect(inactive.getAttribute("aria-pressed")).toBe("false");

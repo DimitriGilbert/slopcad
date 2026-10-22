@@ -127,6 +127,21 @@ const CREATE_FIELDS = [
 const CREATE_DEFAULT_VALUES: CreateValues = { name: "" };
 
 /**
+ * The create form's submit, de-amped.
+ *
+ * Formedible's submit renders the Button's one filled variant, which put a
+ * second amber slab in the right dock — directly under the parameter
+ * panel's pinned Apply. DESIGN.md allows ONE confirming action per
+ * surface, and in the dock's single glance that one is Apply (the
+ * document-changing commit); minting a configuration row is a quiet
+ * secondary verb, so it wears the panel's own control treatment at the
+ * strip's control height. The label and the submit path are untouched.
+ */
+const CREATE_SUBMIT_CLASS =
+  "h-(--tool-h) border-rule bg-panel text-ink-dim shadow-none " +
+  "hover:bg-well hover:text-ink active:shadow-none";
+
+/**
  * The CAD configuration panel: switcher, table, create form, and CSV row.
  */
 export function CadConfigurationPanel({
@@ -146,6 +161,7 @@ export function CadConfigurationPanel({
 
   const createForm = useFormedible<CreateValues>({
     fields: CREATE_FIELDS,
+    submitButtonClassName: CREATE_SUBMIT_CLASS,
     formOptions: {
       defaultValues: CREATE_DEFAULT_VALUES,
       onSubmit: ({ value }) => {
@@ -197,9 +213,17 @@ export function CadConfigurationPanel({
           const label = id === null ? labels.baseOption : (row?.name ?? id);
           const active = activeConfigurationId === id;
           return (
+            /*
+             * The active configuration is a SELECTED ENTITY, so it wears
+             * the system's selection treatment — the row wash plus the
+             * signal edge on the inline start (`PropertyRow`'s selected
+             * appearance, by value) — instead of the flat `--accent` fill
+             * it used to carry. One accent, one meaning: the amber on this
+             * row says "this is the configuration you are looking at".
+             */
             <label
               key={id ?? "base"}
-              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-accent data-[active=true]:bg-accent"
+              className="flex min-h-(--row-h) cursor-pointer items-center gap-(--gap) border-l-2 border-l-transparent px-(--pad-row) text-ui text-ink transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well data-[active=true]:border-l-select-edge data-[active=true]:bg-select-wash data-[active=true]:text-select-ink"
               data-active={active}
             >
               <input
@@ -211,7 +235,7 @@ export function CadConfigurationPanel({
                 checked={active}
                 disabled={!canSwitch}
                 onChange={() => onSwitch?.(id)}
-                className="accent-primary"
+                className="size-3 accent-select-edge"
               />
               <span className="truncate">{label}</span>
             </label>

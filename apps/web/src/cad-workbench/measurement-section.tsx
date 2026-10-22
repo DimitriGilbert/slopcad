@@ -18,6 +18,10 @@
  */
 
 import type { ReactElement, ReactNode } from "react";
+import {
+  ToolButton,
+  ToolGroup,
+} from "@slopcad/ui/components/cockpit/tool-button";
 import type { BoundsReadout } from "./bounds-inspection";
 import type { MassPropertiesReadout } from "./mass-properties-inspection";
 import type { RadiusReadout } from "./radius-inspection";
@@ -95,36 +99,37 @@ export function WorkbenchMeasurementSection({
         Measurement
       </div>
       {/* The Phase 46 section display controls: the persisted plane's clip
-          toggle and the view-mode toggle (the cut solid with cap faces). */}
-      <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px]">
-        <button
-          type="button"
-          data-testid="section-clip-toggle"
+          toggle and the view-mode toggle (the cut solid with cap faces).
+          Both are ARMED TOOLS, so their pressed appearance is the
+          primitive's: `aria-pressed` carries the truth and `ToolButton`
+          paints the one sanctioned wash plus a 1px signal edge. They used
+          to tint their LABEL amber as well, which made an armed clip read
+          as loud as the selected body beside it. */}
+      <ToolGroup
+        className="px-(--pad-panel) py-1"
+        label="Section display"
+        separated={false}
+      >
+        <ToolButton
           aria-pressed={sectionClipped}
+          className="font-mono"
+          data-testid="section-clip-toggle"
           onClick={onToggleSectionClipped}
-          className={`border-border rounded-sm border px-1.5 py-0.5 font-mono ${
-            sectionClipped
-              ? "bg-signal/15 border-signal/50 text-signal"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+          size="sm"
         >
           section
-        </button>
-        <button
-          type="button"
-          data-testid="section-view-toggle"
+        </ToolButton>
+        <ToolButton
           aria-pressed={sectionViewMode}
+          className="font-mono"
+          data-testid="section-view-toggle"
           disabled={!sectionClipped}
           onClick={onToggleSectionViewMode}
-          className={`border-border rounded-sm border px-1.5 py-0.5 font-mono disabled:opacity-40 ${
-            sectionViewMode
-              ? "bg-signal/15 border-signal/50 text-signal"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+          size="sm"
         >
           view cut
-        </button>
-      </div>
+        </ToolButton>
+      </ToolGroup>
       {measured ? (
         <div className="flex flex-col gap-2 px-2.5 py-2.5 text-xs">
           <MeasurementRow label="Distance" text={distanceText}>

@@ -4,8 +4,15 @@
  * and driving tool activation through the store's `arm` operation (the
  * host's documented re-arm composition: cancel-if-active, reset, activate),
  * so switching tools works from any lifecycle phase and every change rides
- * a store notification. Built on the existing `Button` primitive — no new
- * primitives, no tool state of its own.
+ * a store notification. Built on the cockpit `ToolButton` / `KeyCap`
+ * primitives — no new primitives, no tool state of its own.
+ *
+ * The armed appearance is the primitive's, not this file's: `aria-pressed`
+ * is the armed truth, and `ToolButton` renders it as the system's one
+ * sanctioned signal appearance on a control (a wash plus a 1px edge). The
+ * strip used to paint the live tool as a filled `--accent` slab with its
+ * own inset signal ring — a second, louder dialect of the same state, and
+ * the single biggest amber in the cockpit.
  *
  * ## State: two documented input modes, props first
  *
@@ -67,7 +74,7 @@ import {
 } from "@slopcad/cad-react";
 import { cn } from "cn";
 
-import { Button } from "../button";
+import { KeyCap, ToolButton } from "../cockpit/tool-button";
 
 /** The user-facing strings of one tool's button. */
 export interface CadToolbarToolLabels {
@@ -200,7 +207,7 @@ export function CadToolbar({
         };
         const shortcut = shortcutForIndex(index);
         return (
-          <Button
+          <ToolButton
             key={toolId}
             aria-keyshortcuts={shortcut ?? undefined}
             aria-pressed={active}
@@ -214,21 +221,12 @@ export function CadToolbar({
                     activate(toolId);
                   }
             }
-            className="data-[active=true]:bg-accent data-[active=true]:text-accent-foreground data-[active=true]:shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_38%,transparent)] gap-1.5 px-2"
             size="sm"
             title={toolLabels.tooltip}
-            variant="ghost"
           >
             {toolLabels.label}
-            {shortcut !== null ? (
-              <kbd
-                aria-hidden="true"
-                className="border-border text-muted-foreground rounded-[2px] border bg-transparent px-1 font-mono text-[10px] leading-4 font-normal"
-              >
-                {shortcut}
-              </kbd>
-            ) : null}
-          </Button>
+            {shortcut !== null ? <KeyCap>{shortcut}</KeyCap> : null}
+          </ToolButton>
         );
       })}
     </div>

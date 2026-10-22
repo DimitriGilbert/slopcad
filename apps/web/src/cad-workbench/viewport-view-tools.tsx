@@ -15,6 +15,17 @@
  * covers the whole viewport and owns the gesture (the rectangle is drawn
  * live; pointer-up commits; Escape cancels).
  *
+ * ## The accent rule
+ *
+ * Every control in the strip is a `ToolButton` — the system's one tool
+ * control. That matters here because this panel used to hold FOUR filled
+ * amber slabs at rest (the live display mode, the live light rig, the live
+ * render quality, and an armed zoom window), which is four more than
+ * DESIGN.md allows in one glance. The armed truth is `aria-pressed`, and
+ * the primitive renders it as the sanctioned wash plus a 1px signal edge;
+ * idle controls are dim ink on nothing, momentary verbs (the standard
+ * views, fit, look-at, reset) carry no pressed state at all.
+ *
  * ## Determinism
  *
  * The view cube is a pure projection of the effective camera
@@ -53,7 +64,7 @@ import {
   RotateCcw,
   ZoomIn,
 } from "lucide-react";
-import { Button } from "@slopcad/ui/components/button";
+import { ToolButton } from "@slopcad/ui/components/cockpit/tool-button";
 import type { ViewportViewSession } from "./viewport-view";
 
 /** Props of {@link CadViewportViewTools}. */
@@ -432,126 +443,120 @@ export function CadViewportViewTools({
             ) : null}
           </div>
         ) : null}
-        <div className="grid grid-cols-2 gap-1">
+        <div className="grid grid-cols-2 gap-(--gap-tight)">
           {STANDARD_VIEWS.map((view) => (
-            <Button
+            <ToolButton
+              className="justify-center"
               data-testid={view.testId}
               key={view.id}
               onClick={() => {
                 commandStandardView(view.id);
               }}
-              size="xs"
+              size="sm"
               title={`${view.label} view`}
-              type="button"
-              variant="outline"
             >
               {view.label}
-            </Button>
+            </ToolButton>
           ))}
         </div>
         {/* The icon verbs keep their natural compact size in one centered
             row — the panel is wide enough that a stretched 2×2 grid would
             read as four empty bars. */}
-        <div className="flex justify-center gap-1">
-          <Button
+        <div className="flex justify-center gap-(--gap-tight)">
+          <ToolButton
             aria-label="Fit the view to the model bounds"
+            className="w-(--control-h) justify-center px-0"
             data-testid="view-fit"
             disabled={bounds === null || effectiveCamera === null}
             onClick={commandFit}
-            size="xs"
+            size="sm"
             title="Fit to bounds"
-            type="button"
-            variant="outline"
           >
-            <Maximize aria-hidden="true" className="size-3.5" />
-          </Button>
-          <Button
+            <Maximize aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
             aria-label={zoomWindowArmed ? "Cancel zoom window" : "Zoom window"}
             aria-pressed={zoomWindowArmed}
+            className="w-(--control-h) justify-center px-0"
             data-testid="view-zoom-window"
             onClick={() => {
               setZoomWindowArmed((armed) => !armed);
               setDrag(null);
             }}
-            size="xs"
+            size="sm"
             title="Zoom window"
-            type="button"
-            variant={zoomWindowArmed ? "default" : "outline"}
           >
-            <ZoomIn aria-hidden="true" className="size-3.5" />
-          </Button>
-          <Button
+            <ZoomIn aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
             aria-label="Look at the selection"
+            className="w-(--control-h) justify-center px-0"
             data-testid="view-look-at"
             disabled={lookAt === null || effectiveCamera === null}
             onClick={commandLookAt}
-            size="xs"
+            size="sm"
             title="Look at selection"
-            type="button"
-            variant="outline"
           >
-            <Crosshair aria-hidden="true" className="size-3.5" />
-          </Button>
-          <Button
+            <Crosshair aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
             aria-label={`Switch to ${projectionLabel} projection`}
+            className="w-(--control-h) justify-center px-0"
             data-testid="view-projection-toggle"
             disabled={effectiveCamera === null}
             onClick={commandProjectionToggle}
-            size="xs"
+            size="sm"
             title={`${projectionLabel} projection`}
-            type="button"
-            variant="outline"
           >
-            <Box aria-hidden="true" className="size-3.5" />
-          </Button>
+            <Box aria-hidden="true" />
+          </ToolButton>
         </div>
         <div
-          className="grid grid-cols-2 gap-1"
+          className="grid grid-cols-2 gap-(--gap-tight)"
           role="group"
           aria-label="Display mode"
         >
           {DISPLAY_MODES.map((mode) => (
-            <Button
+            <ToolButton
               aria-pressed={session.displayMode === mode.id}
+              className="justify-center"
               data-testid={`display-mode-${mode.id}`}
               key={mode.id}
               onClick={() => {
                 onDisplayMode(mode.id);
               }}
-              size="xs"
+              size="sm"
               title={`${mode.label} display`}
-              type="button"
-              variant={session.displayMode === mode.id ? "default" : "outline"}
             >
               {mode.label}
-            </Button>
+            </ToolButton>
           ))}
         </div>
         <div
-          className="grid grid-cols-3 gap-1"
+          className="grid grid-cols-3 gap-(--gap-tight)"
           role="group"
           aria-label="Light rig"
         >
           {LIGHT_RIGS.map((rig) => (
-            <Button
+            <ToolButton
               aria-pressed={session.lightRig === rig.id}
+              className="justify-center"
               data-testid={`light-rig-${rig.id}`}
               key={rig.id}
               onClick={() => {
                 onLightRig(rig.id);
               }}
-              size="xs"
+              size="sm"
               title={`${rig.label} light rig`}
-              type="button"
-              variant={session.lightRig === rig.id ? "default" : "outline"}
             >
               {rig.label}
-            </Button>
+            </ToolButton>
           ))}
         </div>
-        <div className="flex justify-center gap-1">
-          <Button
+        <div className="flex justify-center gap-(--gap-tight)">
+          <ToolButton
             aria-label="Toggle first/third-angle convention"
+            className="w-(--control-h) justify-center px-0"
             data-testid="view-convention-toggle"
             onClick={() => {
               onConvention(
@@ -560,67 +565,58 @@ export function CadViewportViewTools({
                   : "third-angle",
               );
             }}
-            size="xs"
+            size="sm"
             title={`Convention: ${
               session.convention === "third-angle"
                 ? "third angle"
                 : "first angle"
             }`}
-            type="button"
-            variant="outline"
           >
-            <Frame aria-hidden="true" className="size-3.5" />
-          </Button>
-          <Button
+            <Frame aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
             aria-label="Reset the view to the document spec"
+            className="w-(--control-h) justify-center px-0"
             data-testid="view-reset"
             disabled={session.userCamera === null}
             onClick={() => {
               onUserCamera(null);
             }}
-            size="xs"
+            size="sm"
             title="Reset to spec view"
-            type="button"
-            variant="outline"
           >
-            <RotateCcw aria-hidden="true" className="size-3.5" />
-          </Button>
+            <RotateCcw aria-hidden="true" />
+          </ToolButton>
         </div>
         <div
-          className="grid grid-cols-2 gap-1"
+          className="grid grid-cols-2 gap-(--gap-tight)"
           role="group"
           aria-label="Render quality"
         >
-          <Button
+          <ToolButton
             aria-pressed={session.renderQuality === "standard"}
+            className="justify-center"
             data-testid="render-quality-standard"
             onClick={() => {
               onRenderQuality("standard");
             }}
-            size="xs"
+            size="sm"
             title="Standard render (the deterministic boot path)"
-            type="button"
-            variant={
-              session.renderQuality === "standard" ? "default" : "outline"
-            }
           >
             Standard
-          </Button>
-          <Button
+          </ToolButton>
+          <ToolButton
             aria-pressed={session.renderQuality === "quality"}
+            className="justify-center"
             data-testid="render-quality-quality"
             onClick={() => {
               onRenderQuality("quality");
             }}
-            size="xs"
+            size="sm"
             title="Quality render: soft shadows, ambient occlusion (opt-in)"
-            type="button"
-            variant={
-              session.renderQuality === "quality" ? "default" : "outline"
-            }
           >
             Quality
-          </Button>
+          </ToolButton>
         </div>
       </div>
     </div>

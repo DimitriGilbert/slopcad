@@ -537,7 +537,6 @@
             "packages/ui/src/components/cad/cad-sketch-canvas.tsx",
             "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
-            "packages/ui/src/components/cad/cad-toolbar.tsx",
             "packages/ui/src/components/cockpit/property-row.tsx",
             "packages/ui/src/components/cockpit/tool-button.tsx",
             "packages/ui/src/components/formedible/fields/array-field.tsx",

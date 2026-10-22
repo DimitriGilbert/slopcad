@@ -2631,7 +2631,11 @@ export function CompleteCadWorkbench({
                 : "bg-status-ok"
             }`}
           />
-          <span className="text-signal font-mono text-[11px]">
+          {/* The scene kind is DATA — the document's own name for what is
+              on the stage — so it is instrument ink, not the signal. In
+              amber it was a permanent accent in the app bar competing with
+              the armed tool two groups to its right. */}
+          <span className="text-ink font-mono text-[11px] tabular">
             {showingPreview ? "import" : engine.activeScene}
           </span>
           <span className="text-muted-foreground hidden font-mono text-[11px] 2xl:inline">
@@ -3210,9 +3214,16 @@ export function CompleteCadWorkbench({
       </div>
       {/* The status frame: the settle lamp rides the status bar's left
           edge — the settle protocol made glanceable and machine-readable
-          (`data-settle-lamp`). Lit (signal, soft glow in dark) while the
-          rendered pixels agree with the document; a hollow ring while the
-          scene settles or an import preview owns the stage. */}
+          (`data-settle-lamp`). Lit while the rendered pixels agree with
+          the document; a hollow ring while the scene settles or an import
+          preview owns the stage.
+
+          The lit lamp used to be the SIGNAL colour with a dark-register
+          glow, which meant the cockpit carried a permanent amber light in
+          its bottom-left corner for its whole healthy life — the accent
+          spent on a steady state instead of on the armed tool. "Settled"
+          is a status, so the lamp is the status lamp's own green, flat:
+          the cockpit's depth comes from value and rules, never a glow. */}
       <div className="relative shrink-0 [&_[data-slot='cad-status-bar']]:pl-9">
         <span
           className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2"
@@ -3225,10 +3236,8 @@ export function CompleteCadWorkbench({
         >
           <span
             aria-hidden="true"
-            className={`block size-2 transition-colors duration-200 ${
-              settled
-                ? "bg-signal dark:shadow-[0_0_8px_1px] dark:shadow-signal/50"
-                : "border-muted-foreground/70 border"
+            className={`block size-2 rounded-full transition-colors duration-(--dur-state) ${
+              settled ? "bg-status-ok" : "border border-ink-faint"
             }`}
           />
         </span>
