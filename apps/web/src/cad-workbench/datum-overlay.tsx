@@ -180,7 +180,11 @@ function MarkerSvg({
           className="fill-none stroke-signal"
           strokeWidth={1.5}
         />
-        <text x={ox + 7} y={oy + 3} className="fill-signal text-[10px]">
+        <text
+          x={ox + 7}
+          y={oy + 3}
+          className="fill-viewport-ink-dim text-micro"
+        >
           {marker.name}
         </text>
       </g>
@@ -212,7 +216,11 @@ function MarkerSvg({
           strokeWidth={1.25}
           strokeDasharray="6 3 1.5 3"
         />
-        <text x={ox + 7} y={oy + 3} className="fill-signal text-[10px]">
+        <text
+          x={ox + 7}
+          y={oy + 3}
+          className="fill-viewport-ink-dim text-micro"
+        >
           {marker.name}
         </text>
       </g>
@@ -260,8 +268,12 @@ function MarkerSvg({
           strokeWidth={1.25}
           strokeDasharray={marker.kind === "plane" ? "5 3" : undefined}
         />
-        <circle cx={ox} cy={oy} r={2} className="fill-signal" />
-        <text x={ox + 7} y={oy + 3} className="fill-signal text-[10px]">
+        <circle cx={ox} cy={oy} r={2} className="fill-viewport-ink-dim" />
+        <text
+          x={ox + 7}
+          y={oy + 3}
+          className="fill-viewport-ink-dim text-micro"
+        >
           {marker.name}
         </text>
       </g>

@@ -255,9 +255,7 @@ export function WorkbenchLayout({
           supplies one; the bare workbench renders nothing here, keeping its
           pinned DOM byte-identical. */}
       {bar === undefined ? null : (
-        <div className="border-border bg-background shrink-0 border-b">
-          {bar}
-        </div>
+        <div className="border-rule bg-chrome shrink-0 border-b">{bar}</div>
       )}
       {/* Tool row: the component's tool strip; the feature timeline (the
           Phase 20 history surface) sits beside it behind a divider, and the
@@ -269,7 +267,7 @@ export function WorkbenchLayout({
           MOUNTED but hidden so the worker session's surface writer keeps
           their ids. */}
       <div
-        className={`border-border bg-background h-10 shrink-0 items-center gap-2 border-b px-2 ${
+        className={`border-rule bg-chrome h-10 shrink-0 items-center gap-2 border-b px-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
@@ -285,15 +283,15 @@ export function WorkbenchLayout({
         />
         <div
           aria-label="Feature timeline"
-          className="border-border flex h-full min-w-0 items-center gap-1 border-l pl-3"
+          className="border-rule flex h-full min-w-0 items-center gap-1 border-l pl-3"
           data-testid="feature-timeline"
           role="group"
         >
-          <span className="text-muted-foreground mr-1 text-xs font-medium tracking-wider uppercase">
+          <span className="text-ink-dim mr-1 text-xs font-medium tracking-wider uppercase">
             Timeline
           </span>
           {timeline === null ? (
-            <span className="text-muted-foreground text-xs">
+            <span className="text-ink-dim text-xs">
               {regenerationIssue ?? "\u2026"}
             </span>
           ) : (
@@ -470,7 +468,7 @@ export function WorkbenchLayout({
           Hidden in sketch mode — the sketch editor carries its own status
           line — but MOUNTED, so the writer's ids keep existing. */}
       <div
-        className={`border-border bg-background text-muted-foreground h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
+        className={`border-rule bg-chrome text-ink-dim h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >

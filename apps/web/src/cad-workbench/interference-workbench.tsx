@@ -517,14 +517,14 @@ export function InterferenceWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 58 interference fixture — report panel, isolation, snapshots
         </h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-ink-dim text-sm">
           A plate, an overlapping block, and a clear block. Run the check to
           fill the report panel; isolate a pair; export the snapshot.
         </p>
       </div>
       <div className="flex items-center gap-2">
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="interference-run"
           onClick={runCheck}
           type="button"
@@ -532,7 +532,7 @@ export function InterferenceWorkbenchPage(): ReactElement {
           Run interference check
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="interference-show-all"
           disabled={isolated === undefined}
           onClick={() => setIsolated(undefined)}
@@ -541,7 +541,7 @@ export function InterferenceWorkbenchPage(): ReactElement {
           Show all instances
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well disabled:opacity-50"
           data-testid="interference-export-json"
           disabled={preparedExports === null}
           onClick={() => {
@@ -552,7 +552,7 @@ export function InterferenceWorkbenchPage(): ReactElement {
           Export snapshot (JSON)
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well disabled:opacity-50"
           data-testid="interference-export-html"
           disabled={preparedExports === null}
           onClick={() => {
@@ -574,24 +574,24 @@ export function InterferenceWorkbenchPage(): ReactElement {
         ) : null}
       </div>
       <section
-        className="border-border rounded-md border p-4"
+        className="border-rule rounded-md border p-4"
         data-testid="interference-panel"
       >
         <h2 className="text-sm font-semibold">Interference report</h2>
         {model.status === "idle" ? (
-          <p className="text-muted-foreground mt-2 text-sm">
+          <p className="text-ink-dim mt-2 text-sm">
             No report yet — run the check. The panel shows nothing before a
             report exists.
           </p>
         ) : (
           <>
-            <p className="text-muted-foreground mt-1 text-xs">
+            <p className="text-ink-dim mt-1 text-xs">
               checked {model.checkedCount} · interfering {model.pairCount} ·
               skipped {model.skippedCount} · clearances {model.clearanceCount}
             </p>
             <table className="mt-2 w-full text-left text-sm">
               <thead>
-                <tr className="text-muted-foreground text-xs">
+                <tr className="text-ink-dim text-xs">
                   <th className="py-1 pr-3 font-medium">First</th>
                   <th className="py-1 pr-3 font-medium">Second</th>
                   <th className="py-1 pr-3 font-medium">Verdict</th>
@@ -611,7 +611,7 @@ export function InterferenceWorkbenchPage(): ReactElement {
                     <td className="py-1">
                       {row.verdict === "interferes" ? (
                         <button
-                          className="border-border rounded-md border px-2 py-0.5 text-xs font-medium hover:bg-muted"
+                          className="border-rule rounded-md border px-2 py-0.5 text-xs font-medium hover:bg-well"
                           data-testid={`interference-isolate-${index}`}
                           onClick={() =>
                             setIsolated({

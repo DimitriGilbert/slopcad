@@ -508,14 +508,14 @@ export function AnalysisWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 58 analysis fixture — draft, curvature, zebra, COG/mass
         </h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-ink-dim text-sm">
           A draft box, an open tube, a curvature comb arc, and a two-material
           mass compound with its COG marker.
         </p>
       </div>
       <div className="flex items-center gap-2">
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="analysis-run"
           onClick={runAnalysis}
           type="button"
@@ -523,7 +523,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
           Run draft &amp; curvature analysis
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="analysis-zebra-toggle"
           onClick={() => setZebra((current) => !current)}
           type="button"
@@ -533,7 +533,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section
-          className="border-border rounded-md border p-4"
+          className="border-rule rounded-md border p-4"
           data-testid="analysis-draft-panel"
         >
           <h2 className="text-sm font-semibold">Draft analysis</h2>
@@ -546,11 +546,11 @@ export function AnalysisWorkbenchPage(): ReactElement {
                 >
                   <span
                     aria-hidden
-                    className="border-border inline-block h-3 w-3 rounded-sm border"
+                    className="border-rule inline-block h-3 w-3 rounded-sm border"
                     style={{ background: face.colorHex }}
                   />
                   <span className="w-16">{face.classification}</span>
-                  <span className="text-muted-foreground">
+                  <span className="text-ink-dim">
                     {stampNumber(face.angleDeg)}° from pull · {face.cornerCount}{" "}
                     corners
                   </span>
@@ -558,7 +558,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
               ))}
             </ul>
           ) : (
-            <p className="text-muted-foreground mt-2 text-sm">
+            <p className="text-ink-dim mt-2 text-sm">
               {ran
                 ? "The draft analysis declined the soup."
                 : "No draft report yet — run the analysis."}
@@ -566,7 +566,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
           )}
         </section>
         <section
-          className="border-border rounded-md border p-4"
+          className="border-rule rounded-md border p-4"
           data-testid="analysis-curvature-panel"
         >
           <h2 className="text-sm font-semibold">Curvature</h2>
@@ -577,17 +577,17 @@ export function AnalysisWorkbenchPage(): ReactElement {
                   <li className="flex items-center gap-2" key={entry.band}>
                     <span
                       aria-hidden
-                      className="border-border inline-block h-3 w-3 rounded-sm border"
+                      className="border-rule inline-block h-3 w-3 rounded-sm border"
                       style={{ background: entry.colorHex }}
                     />
                     <span className="w-14">{entry.band}</span>
-                    <span className="text-muted-foreground">
+                    <span className="text-ink-dim">
                       {entry.vertices} welded vertices
                     </span>
                   </li>
                 ))}
               </ul>
-              <p className="text-muted-foreground">
+              <p className="text-ink-dim">
                 Comb over the r=30 arc: max |κ| ={" "}
                 {COMB_RESULT.ok
                   ? stampNumber(COMB_RESULT.value.maxCurvature)
@@ -597,7 +597,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
               </p>
             </div>
           ) : (
-            <p className="text-muted-foreground mt-2 text-sm">
+            <p className="text-ink-dim mt-2 text-sm">
               {ran
                 ? "The curvature analysis declined the inputs."
                 : "No curvature report yet — run the analysis."}
@@ -605,7 +605,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
           )}
         </section>
         <section
-          className="border-border rounded-md border p-4 lg:col-span-2"
+          className="border-rule rounded-md border p-4 lg:col-span-2"
           data-testid="analysis-mass-panel"
         >
           <h2 className="text-sm font-semibold">
@@ -625,7 +625,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
               </p>
             </div>
           ) : (
-            <p className="text-muted-foreground mt-2 text-sm">
+            <p className="text-ink-dim mt-2 text-sm">
               The mass aggregate declined — {mass.error.code}
             </p>
           )}

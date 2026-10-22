@@ -520,7 +520,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 52 Assemblies fixture — patterns, mirror, explode, motion
         </h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-ink-dim text-sm">
           Component patterns and mirror placements stamp ordinary occurrences;
           the explode state and the revolute joint compose on top of the
           resolved instances; the strip below is the cross-document staleness
@@ -533,7 +533,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-linear-pattern"
           onClick={linearPattern}
           type="button"
@@ -541,7 +541,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           Linear pattern ×{String(LINEAR_COUNT)}
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-circular-pattern"
           onClick={circularPattern}
           type="button"
@@ -549,7 +549,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           Circular pattern ×{String(CIRCULAR_COUNT)}
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-mirror"
           onClick={mirrorLast}
           type="button"
@@ -557,7 +557,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           Mirror across plane
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-explode-author"
           onClick={authorExplode}
           type="button"
@@ -565,7 +565,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           Author explode state
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-drag-decline"
           onClick={() => {
             const declined = motionDragDecline({
@@ -588,7 +588,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
       </div>
       <div className="flex flex-wrap items-center gap-6">
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Explode</span>
+          <span className="text-ink-dim">Explode</span>
           <input
             aria-label="Explode factor"
             className="w-48"
@@ -605,7 +605,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           <span className="font-mono text-xs">{explodeFactor.toFixed(2)}</span>
         </label>
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Joint (deg)</span>
+          <span className="text-ink-dim">Joint (deg)</span>
           <input
             aria-label="Joint parameter"
             className="w-48"
@@ -623,15 +623,15 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
             {motionParameter.toFixed(0)}°
           </span>
         </label>
-        <span className="text-muted-foreground text-xs">
+        <span className="text-ink-dim text-xs">
           clearance floor{" "}
           <span className="font-mono" data-testid="motion-clearance">
             {clearanceText} mm
           </span>
         </span>
       </div>
-      <div className="border-border flex flex-wrap items-center gap-2 rounded-md border p-3">
-        <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+      <div className="border-rule flex flex-wrap items-center gap-2 rounded-md border p-3">
+        <span className="text-ink-dim text-xs font-medium tracking-wider uppercase">
           Cross-document
         </span>
         <span className="font-mono text-xs">
@@ -645,7 +645,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           {staleness.stale ? "STALE" : "up to date"}
         </span>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-edit-source"
           onClick={() => {
             setSourceRevision((revision) => revision + 1);
@@ -655,7 +655,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           Edit source part
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="motion-regenerate"
           disabled={!staleness.stale}
           onClick={() => {

@@ -614,7 +614,7 @@ export function CadViewport({
     >
       {projection === null ? (
         <div
-          className="flex h-full items-center justify-center text-sm text-muted-foreground"
+          className="flex h-full items-center justify-center text-body text-viewport-ink-dim"
           role="status"
         >
           {labels.loading}

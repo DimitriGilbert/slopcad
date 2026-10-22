@@ -190,15 +190,15 @@ export function CadTopologyPickPanel({
   return (
     <section
       aria-label={title}
-      className="pointer-events-auto absolute top-2 left-2 flex max-h-[calc(100%-1rem)] w-80 flex-col gap-2 overflow-y-auto rounded-sm border border-border bg-background/95 p-3 text-sm shadow-sm"
+      className="pointer-events-auto absolute top-2 left-2 flex max-h-[calc(100%-1rem)] w-80 flex-col gap-(--gap-group) overflow-y-auto rounded-md border border-rule-strong bg-overlay p-3 text-ui shadow-overlay"
       data-testid="workbench-topology-pick-panel"
       data-topology-pick-verb={verb}
     >
-      <h2 className="font-medium">{title}</h2>
-      <p className="text-xs text-muted-foreground">{hint}</p>
+      <h2 className="text-title text-ink">{title}</h2>
+      <p className="text-label text-ink-dim">{hint}</p>
       {queryError !== null ? (
         <p
-          className="text-xs text-destructive"
+          className="text-label text-destructive"
           data-testid="workbench-topology-pick-failed"
           role="alert"
         >
@@ -206,7 +206,7 @@ export function CadTopologyPickPanel({
         </p>
       ) : targets === null ? (
         <p
-          className="text-xs text-muted-foreground"
+          className="text-label text-ink-dim"
           data-testid="workbench-topology-pick-loading"
           role="status"
         >
@@ -214,7 +214,7 @@ export function CadTopologyPickPanel({
         </p>
       ) : targets.length === 0 ? (
         <p
-          className="text-xs text-destructive"
+          className="text-label text-destructive"
           data-testid="workbench-topology-pick-unavailable"
           role="alert"
         >
@@ -224,19 +224,21 @@ export function CadTopologyPickPanel({
         </p>
       ) : (
         <>
-          <p className="text-xs">{labels.topologyPickInstruction}</p>
+          <p className="text-ui text-ink-dim">
+            {labels.topologyPickInstruction}
+          </p>
           <div data-testid="workbench-topology-picks" role="status">
-            <p className="text-xs font-medium">
+            <p className="text-ui font-medium text-ink">
               {selection === null
                 ? section
                 : `${section} — ${labels.topologyPickTarget}: ${selection.target.name}`}
             </p>
             {pickedLabels.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-label text-ink-dim">
                 {labels.topologyPickNone}
               </p>
             ) : (
-              <ul className="font-mono text-[11px]">
+              <ul className="font-mono text-data text-ink-dim">
                 {pickedLabels.map((option) => (
                   <li key={option.ordinal}>{option.label}</li>
                 ))}

@@ -224,14 +224,14 @@ export function AssemblyWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 50 Assemblies fixture — instances, placements, BOM flags
         </h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-ink-dim text-sm">
           One plate body, its occurrences placed along +x. Add and remove
           instances; the tree and the viewport derive from the document.
         </p>
       </div>
       <div className="flex items-center gap-2">
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="assembly-add-instance"
           onClick={addInstance}
           type="button"
@@ -239,7 +239,7 @@ export function AssemblyWorkbenchPage(): ReactElement {
           Add instance
         </button>
         <button
-          className="border-border rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className="border-rule rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-well"
           data-testid="assembly-remove-instance"
           disabled={occurrenceCount === 0}
           onClick={removeLastInstance}

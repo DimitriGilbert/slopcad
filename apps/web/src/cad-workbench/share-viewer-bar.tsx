@@ -176,7 +176,7 @@ export function WorkbenchShareBar({
     >
       <span
         aria-live="polite"
-        className="text-muted-foreground font-mono text-xs"
+        className="text-ink-dim font-mono text-xs"
         data-testid="workbench-share-state"
       >
         {state?.message ?? null}
@@ -212,7 +212,7 @@ export function WorkbenchShareBar({
                 <Upload className="size-3" />
                 {SERVER_LINK.label}
               </span>
-              <span className="text-muted-foreground text-[11px]">
+              <span className="text-ink-dim text-label">
                 {SERVER_LINK.hint}
               </span>
             </div>

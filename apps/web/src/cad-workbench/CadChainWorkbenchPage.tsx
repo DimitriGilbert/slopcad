@@ -1171,7 +1171,7 @@ function CadChainWorkbenchBody({
           surfaces stay MOUNTED but hidden so the session's surface writer
           keeps the ids. */}
       <div
-        className={`border-border bg-background h-10 shrink-0 items-center gap-2 border-b px-2 ${
+        className={`border-rule bg-chrome h-10 shrink-0 items-center gap-2 border-b px-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
@@ -1183,15 +1183,15 @@ function CadChainWorkbenchBody({
         />
         <div
           aria-label="Feature timeline"
-          className="border-border flex h-full min-w-0 items-center gap-1 border-l pl-3"
+          className="border-rule flex h-full min-w-0 items-center gap-1 border-l pl-3"
           data-testid="feature-timeline"
           role="group"
         >
-          <span className="text-muted-foreground mr-1 text-xs font-medium tracking-wider uppercase">
+          <span className="text-ink-dim mr-1 text-xs font-medium tracking-wider uppercase">
             Timeline
           </span>
           {timeline === null ? (
-            <span className="text-muted-foreground text-xs">
+            <span className="text-ink-dim text-xs">
               {regenerationIssue ?? "\u2026"}
             </span>
           ) : (
@@ -1332,14 +1332,14 @@ function CadChainWorkbenchBody({
             )}
             <section
               aria-label="Measurement"
-              className="border-border bg-background w-48 border"
+              className="border-rule bg-chrome w-48 border"
             >
-              <div className="text-muted-foreground border-border border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+              <div className="text-ink-dim border-rule border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
                 Measurement
               </div>
               <div className="px-2 py-2 text-sm">
                 {measureText === null ? (
-                  <span className="text-muted-foreground font-mono">—</span>
+                  <span className="text-ink-dim font-mono">—</span>
                 ) : (
                   <span id="chain-measure-readout" className="font-mono">
                     {`${measureText} mm`}
@@ -1387,7 +1387,7 @@ function CadChainWorkbenchBody({
       </div>
       {/* Status bar: the settled numbers and the structured failure. */}
       <div
-        className={`border-border bg-background text-muted-foreground h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
+        className={`border-rule bg-chrome text-ink-dim h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
@@ -1431,7 +1431,7 @@ function CadChainWorkbenchBody({
             <DialogHeader>
               <DialogTitle>{CAD_FEATURE_FORM_LABELS.holeTitle}</DialogTitle>
             </DialogHeader>
-            <p className="text-muted-foreground text-xs leading-snug">
+            <p className="text-ink-dim text-xs leading-snug">
               {CAD_FEATURE_FORM_LABELS.holeHint}
             </p>
             {structuredHoleOutcome !== null && !structuredHoleOutcome.ok ? (

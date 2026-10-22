@@ -297,6 +297,9 @@ export interface CadModelTreeProps {
    *
    * - `"card"` (default) — the standalone look every fixture and demo
    *   page pins: a bordered, filled, 224px card with its own name band.
+   *   Its STRUCTURE is pinned, not its palette: step 4 moved the card's
+   *   tokens onto the ramp too (`bg-panel`, `border-rule`, the status ink
+   *   family) without touching one element or attribute.
    * - `"flush"` — the tree renders ROWS ONLY. No container surface, no
    *   border, no width, and no name band, because a cockpit rail's
    *   `PanelSection` already supplies the enclosure and the name; two
@@ -320,20 +323,20 @@ const STATUS_PRESENTATION: Readonly<
 > = Object.freeze({
   // The healthy state stays quiet; failures are the only loud row.
   valid: Object.freeze({
-    dot: "bg-muted-foreground/40",
-    text: "text-muted-foreground",
+    dot: "bg-ink-faint/60",
+    text: "text-ink-dim",
   }),
   stale: Object.freeze({
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-signal",
+    text: "text-signal",
   }),
   failed: Object.freeze({
     dot: "bg-destructive",
     text: "text-destructive font-medium",
   }),
   suppressed: Object.freeze({
-    dot: "border-muted-foreground/60 bg-transparent",
-    text: "text-muted-foreground italic",
+    dot: "border-ink-faint bg-transparent",
+    text: "text-ink-faint italic",
   }),
 });
 
@@ -595,7 +598,7 @@ function collapsedWithout(
 /** The visibility eye (Phase 44): inline SVG, the ChevronIcon precedent. */
 /** The shared affordance-button classes of the body rows. */
 const buttonClass = cn(
-  "text-muted-foreground hover:text-foreground",
+  "text-ink-dim hover:text-ink",
   "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
 );
 
@@ -739,7 +742,7 @@ function StatusChip({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 text-[11px] leading-none",
+        "inline-flex shrink-0 items-center gap-1 text-label leading-none",
         presentation.text,
       )}
       data-cad-tree-status=""
@@ -790,14 +793,14 @@ function AssemblyChips({
   return (
     <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
       <span
-        className="text-muted-foreground/70 hidden font-mono text-[9.5px] group-hover:inline"
+        className="hidden font-mono text-micro text-ink-faint group-hover:inline"
         title={sourceTitle}
       >
         {sourceLabel}
       </span>
       {node.bomFlag !== undefined ? (
         <span
-          className="border-border bg-background/60 rounded-[3px] border px-1 font-mono text-[9.5px] leading-[15px]"
+          className="rounded-[3px] border border-rule bg-well px-1 font-mono text-micro text-ink-dim leading-[15px]"
           data-cad-tree-bom={node.bomFlag}
         >
           {node.bomFlag === "phantom" ? labels.bomPhantom : labels.bomPurchased}
@@ -805,7 +808,7 @@ function AssemblyChips({
       ) : null}
       {node.stale === true ? (
         <span
-          className="rounded-[3px] bg-amber-500/15 px-1 font-mono text-[9.5px] leading-[15px] text-amber-600 dark:text-amber-400"
+          className="rounded-[3px] bg-signal/15 px-1 font-mono text-micro text-signal leading-[15px]"
           data-cad-tree-stale="true"
         >
           {labels.occurrenceStale}
@@ -964,7 +967,7 @@ function AppearancePicker({
             <button
               aria-pressed={appearancesEqual(current, entry.appearance)}
               className={cn(
-                "hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs",
+                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-ui hover:bg-well",
               )}
               data-testid={`appearance-preset-${entry.id}`}
               key={entry.id}
@@ -981,14 +984,14 @@ function AppearancePicker({
             >
               <span
                 aria-hidden="true"
-                className="border-border inline-block size-3 shrink-0 rounded-full border"
+                className="inline-block size-3 shrink-0 rounded-full border border-rule"
                 style={{ backgroundColor: entry.appearance.baseColor }}
               />
               {entry.label}
             </button>
           ))}
           <button
-            className="hover:bg-accent text-muted-foreground flex w-full items-center rounded-sm px-2 py-1.5 text-left text-xs"
+            className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-ui text-ink-dim hover:bg-well"
             data-testid="appearance-preset-none"
             onClick={(event) => {
               event.stopPropagation();
@@ -1190,10 +1193,10 @@ export function CadModelTree({
             : cn(
                 "rounded-[3px]",
                 selected
-                  ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
+                  ? "bg-select-wash text-select-ink shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
                   : pick === undefined
                     ? "opacity-80"
-                    : "hover:bg-muted",
+                    : "hover:bg-well",
               ),
         )}
         aria-disabled={
@@ -1241,7 +1244,7 @@ export function CadModelTree({
           {collapsible ? (
             <span
               aria-hidden="true"
-              className="text-muted-foreground hover:text-foreground inline-flex size-4 shrink-0 cursor-pointer items-center justify-center"
+              className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
               data-cad-tree-toggle=""
               title={expanded ? labels.collapse : labels.expand}
               onClick={(event) => {
@@ -1254,7 +1257,7 @@ export function CadModelTree({
           ) : (
             <span
               aria-hidden="true"
-              className="text-muted-foreground/40 inline-flex size-4 shrink-0 items-center justify-center font-mono text-[10px]"
+              className="inline-flex size-4 shrink-0 items-center justify-center font-mono text-micro text-ink-faint"
             >
               {row.depth > 0 ? "·" : ""}
             </span>
@@ -1265,11 +1268,7 @@ export function CadModelTree({
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
-              row.depth === 0
-                ? "font-medium"
-                : flush
-                  ? "text-ink-dim"
-                  : "text-muted-foreground",
+              row.depth === 0 ? "font-medium" : "text-ink-dim",
             )}
           >
             {row.label}
@@ -1293,10 +1292,7 @@ export function CadModelTree({
         </div>
         {collapsible && expanded ? (
           <div
-            className={cn(
-              "ml-[11px] border-l pl-1",
-              flush ? "border-rule" : "border-border",
-            )}
+            className={cn("ml-[11px] border-l pl-1", "border-rule")}
             role="group"
           >
             {row.children.map((child) => renderRow(child))}
@@ -1304,7 +1300,7 @@ export function CadModelTree({
         ) : null}
         {failure !== undefined ? (
           <div
-            className="text-destructive px-1.5 pb-1 text-xs leading-4"
+            className="px-1.5 pb-1 text-label text-destructive"
             id={failureId}
           >
             {failure[0]?.message}
@@ -1319,7 +1315,7 @@ export function CadModelTree({
       className={cn(
         flush
           ? "min-w-0 text-ui"
-          : "border-border bg-card/60 w-56 overflow-hidden rounded-md border text-sm",
+          : "w-56 overflow-hidden rounded-md border border-rule bg-panel text-ui",
         className,
       )}
       data-chrome={chrome}
@@ -1328,7 +1324,7 @@ export function CadModelTree({
       {/* The card look's own name band. A rail supplies the name through
           its `PanelSection`, so the flush tree never draws a second one. */}
       {flush ? null : (
-        <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+        <div className="label-section border-b border-rule bg-well/60 px-2.5 py-1.5 text-ink-faint">
           {labels.treeLabel}
         </div>
       )}
@@ -1337,7 +1333,7 @@ export function CadModelTree({
           className={cn(
             flush
               ? "px-(--pad-row) py-(--gap) text-ui text-ink-dim"
-              : "text-muted-foreground px-2.5 py-2 text-xs",
+              : "px-2.5 py-2 text-ui text-ink-dim",
           )}
         >
           {labels.emptyDocument}

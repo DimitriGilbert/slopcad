@@ -123,9 +123,14 @@ function CurveSvg({
         strokeWidth={1.5}
         className="stroke-signal"
       />
-      <circle className="fill-signal" cx={first[0]} cy={first[1]} r={2.5} />
+      <circle
+        className="fill-viewport-ink-dim"
+        cx={first[0]}
+        cy={first[1]}
+        r={2.5}
+      />
       <text
-        className="fill-signal text-[10px]"
+        className="fill-viewport-ink-dim text-micro"
         x={first[0] + 7}
         y={first[1] + 3}
       >

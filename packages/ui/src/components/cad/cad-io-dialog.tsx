@@ -163,7 +163,7 @@ export function CadExportDialog({
           <DialogDescription>{labels.description}</DialogDescription>
         </DialogHeader>
         {formats.length === 0 ? (
-          <p className="text-muted-foreground text-xs">{labels.empty}</p>
+          <p className="text-ink-dim text-xs">{labels.empty}</p>
         ) : (
           <div className="flex flex-col">
             {formats.map((format) => {
@@ -173,7 +173,7 @@ export function CadExportDialog({
               const pending = pendingFormatId === format.id;
               return (
                 <div
-                  className="border-border/60 flex flex-col gap-1.5 border-b py-2.5 last:border-b-0"
+                  className="border-rule/60 flex flex-col gap-1.5 border-b py-2.5 last:border-b-0"
                   data-cad-export-format={format.id}
                   key={format.id}
                 >
@@ -186,13 +186,13 @@ export function CadExportDialog({
                         {format.meta !== undefined ? (
                           <span
                             aria-hidden="true"
-                            className="border-border text-muted-foreground shrink-0 border px-1 font-mono text-[10px] leading-4"
+                            className="border-rule text-ink-dim shrink-0 border px-1 font-mono text-micro leading-4"
                           >
                             {format.meta}
                           </span>
                         ) : null}
                       </div>
-                      <div className="text-muted-foreground text-xs leading-4">
+                      <div className="text-ink-dim text-xs leading-4">
                         {format.description}
                       </div>
                     </div>
@@ -211,7 +211,7 @@ export function CadExportDialog({
                   </div>
                   {entry !== undefined ? (
                     <div
-                      className="text-muted-foreground flex items-center gap-2 font-mono text-xs"
+                      className="text-ink-dim flex items-center gap-2 font-mono text-xs"
                       data-cad-export-entry={format.id}
                     >
                       <span>{`${String(entry.byteCount)} B`}</span>
@@ -375,7 +375,7 @@ export function CadImportDialog({
           <DialogDescription>{labels.description}</DialogDescription>
         </DialogHeader>
         {formats.length === 0 ? (
-          <p className="text-muted-foreground text-xs">{labels.empty}</p>
+          <p className="text-ink-dim text-xs">{labels.empty}</p>
         ) : (
           <div className="flex flex-col">
             {formats.map((format) => {
@@ -384,7 +384,7 @@ export function CadImportDialog({
               );
               return (
                 <div
-                  className="border-border/60 flex items-center justify-between gap-3 border-b py-2.5 last:border-b-0"
+                  className="border-rule/60 flex items-center justify-between gap-3 border-b py-2.5 last:border-b-0"
                   data-cad-import-format={format.id}
                   key={format.id}
                 >
@@ -396,13 +396,13 @@ export function CadImportDialog({
                       {format.meta !== undefined ? (
                         <span
                           aria-hidden="true"
-                          className="border-border text-muted-foreground shrink-0 border px-1 font-mono text-[10px] leading-4"
+                          className="border-rule text-ink-dim shrink-0 border px-1 font-mono text-micro leading-4"
                         >
                           {format.meta}
                         </span>
                       ) : null}
                     </div>
-                    <div className="text-muted-foreground text-xs leading-4">
+                    <div className="text-ink-dim text-xs leading-4">
                       {format.description}
                     </div>
                   </div>
@@ -423,7 +423,7 @@ export function CadImportDialog({
             })}
             <input
               accept={acceptToken}
-              className="border-input bg-background file:bg-background file:text-foreground mt-2.5 w-full rounded-none border px-2 py-1 text-xs"
+              className="border-rule bg-well file:bg-well file:text-ink mt-2.5 w-full rounded-none border px-2 py-1 text-xs"
               data-testid="cad-import-file"
               disabled={pending}
               multiple={false}
@@ -439,7 +439,7 @@ export function CadImportDialog({
         )}
         {outcome !== null ? (
           <div
-            className="border-border/60 text-muted-foreground flex flex-col gap-1 border-t pt-2 font-mono text-xs"
+            className="border-rule/60 text-ink-dim flex flex-col gap-1 border-t pt-2 font-mono text-xs"
             data-cad-import-outcome={outcome.formatId}
           >
             <span>{`source = ${outcome.formatId}`}</span>
