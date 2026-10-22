@@ -62,20 +62,6 @@ async function openCommandMenu(page: Page): Promise<void> {
   );
 }
 
-/** Runs one command-menu row by its command id (the e2e contract). */
-async function runCommand(page: Page, id: string): Promise<void> {
-  await openCommandMenu(page);
-  await page.locator(`[data-cad-command-id="${id}"]`).click();
-  await page.waitForFunction(
-    (rootId) =>
-      document
-        .getElementById(rootId)
-        ?.getAttribute("data-command-menu-open") === "false",
-    ROOT_ID,
-    { timeout: 30_000 },
-  );
-}
-
 async function shoot(page: Page, name: string, taken: string[]): Promise<void> {
   if (!name.includes(nameFilter)) return;
   await page.mouse.move(4, 4);

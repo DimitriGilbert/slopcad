@@ -723,15 +723,26 @@ export function CadParameterPanel({
               })}
             >
               {(state) => (
-                <Button
-                  className="w-full rounded-none border-t border-t-border"
-                  disabled={!state.canSubmit || state.isSubmitting}
-                  onClick={submitApply}
-                  type="button"
-                  variant="default"
-                >
-                  {mergedLabels.submit}
-                </Button>
+                /*
+                 * The panel's pinned confirm. It used to be a full-width
+                 * amber slab welded across the panel's foot, which both
+                 * shouted (the accent rule allows ONE confirming action,
+                 * as a control — not as a banner) and overlapped the last
+                 * parameter field. Now it is a sized control in its own
+                 * ruled footer: the footer owns the separation, the button
+                 * owns only itself.
+                 */
+                <div className="flex shrink-0 justify-end border-t border-rule bg-well/40 px-(--pad-panel) py-1.5">
+                  <Button
+                    disabled={!state.canSubmit || state.isSubmitting}
+                    onClick={submitApply}
+                    size="sm"
+                    type="button"
+                    variant="default"
+                  >
+                    {mergedLabels.submit}
+                  </Button>
+                </div>
               )}
             </parameterForm.form.Subscribe>
           ) : null}

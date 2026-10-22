@@ -144,10 +144,18 @@ function StatusField({
   readonly children: ReactNode;
 }): ReactElement {
   return (
-    <span className="text-muted-foreground flex items-center whitespace-nowrap">
-      <span className="text-muted-foreground">{label}</span>
-      {" = "}
-      <span className="text-foreground">{children}</span>
+    <span className="flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="label-section text-ink-faint">{label}</span>
+      {/*
+       * The separator stays in the TEXT (screen readers and the component's
+       * own tests read `label = value`) but leaves the pixels: a strip of
+       * `status=idle tool=select selection=1` reads as a debug dump, and
+       * this is product chrome. Visually it is now a row of DRO readouts —
+       * small-caps name, tabular value — which is how the rest of the
+       * instrument states a fact.
+       */}
+      <span className="sr-only">{" = "}</span>
+      <span className="text-ink tabular">{children}</span>
     </span>
   );
 }
@@ -190,7 +198,7 @@ export function CadStatusBar({
   return (
     <div
       className={cn(
-        "border-border bg-card/50 text-muted-foreground flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px]",
+        "flex h-(--tool-h) shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-panel px-(--pad-panel) font-mono text-micro text-ink-dim",
         className,
       )}
       data-slot="cad-status-bar"

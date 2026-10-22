@@ -285,8 +285,16 @@ export function CadConfigurationPanel({
           </Button>
         )}
         {onImportCsv === undefined ? null : (
-          <label className="inline-flex">
-            <span className="sr-only">{labels.importCsv}</span>
+          /*
+           * A native file input renders the browser's own "Choose File /
+           * No file chosen" control, which in a CAD rail reads as an
+           * unstyled escape hatch (and overflowed it). The input keeps its
+           * testid and its accessible name — it is still the real control,
+           * and the label still activates it — but it stops drawing
+           * itself, and the label wears the product's control treatment.
+           */
+          <label className="inline-flex h-(--tool-h) cursor-pointer items-center gap-1.5 rounded-sm border border-rule bg-panel px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) hover:bg-well hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)">
+            <span>{labels.importCsv}</span>
             <input
               type="file"
               accept=".csv,text/csv"
@@ -296,7 +304,7 @@ export function CadConfigurationPanel({
                 void importCsv(event.target.files);
                 event.target.value = "";
               }}
-              className="w-44 text-xs file:mr-2 file:rounded file:border file:border-input file:bg-background file:px-2 file:py-0.5 file:text-xs"
+              className="sr-only"
             />
           </label>
         )}

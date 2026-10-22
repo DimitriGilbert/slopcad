@@ -432,13 +432,16 @@ function sketchHintStoredDismissal(): boolean {
 }
 
 /**
- * The DRO's value ink. In the dark register the digits read as an emissive
- * machine readout — amber over the near-black band with a soft glow — the
- * cockpit's glance-mark; in light the values are plain instrument ink on
- * paper and nothing glows.
+ * The DRO's value ink: instrument ink, tabular, in BOTH registers.
+ *
+ * These digits used to be emissive amber with a glow. They are data, not a
+ * signal — and the accent rule (DESIGN.md) reserves the signal colour for
+ * the armed tool, the selected entity and one confirming action. With a
+ * body selected the old treatment put amber on the extents, the volume,
+ * the triangle count AND the tool name at once, which is how a cockpit
+ * stops being readable: when everything glows, nothing reads.
  */
-const DRO_VALUE =
-  "text-foreground dark:text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]";
+const DRO_VALUE = "text-ink tabular";
 
 /**
  * The complete CAD workbench: all eight plan surfaces composed over the
@@ -2254,7 +2257,7 @@ export function CompleteCadWorkbench({
         />
         {showingPreview ? (
           <>
-            <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+            <span className="text-ink tabular">
               import · {ioSurface.preview?.source ?? ""}
             </span>
             <span>
@@ -2278,14 +2281,10 @@ export function CompleteCadWorkbench({
             </span>
           </>
         ) : applied === null ? (
-          <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
-            computing…
-          </span>
+          <span className="text-ink tabular">computing…</span>
         ) : (
           <>
-            <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
-              {engine.activeScene}
-            </span>
+            <span className="text-ink tabular">{engine.activeScene}</span>
             <span>
               extents{" "}
               <span className={DRO_VALUE}>
@@ -2312,9 +2311,7 @@ export function CompleteCadWorkbench({
           {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
             <span>
               tool{" "}
-              <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
-                {toolsApi.activeToolId}
-              </span>{" "}
+              <span className="text-ink tabular">{toolsApi.activeToolId}</span>{" "}
               · Esc cancels
             </span>
           ) : null}
