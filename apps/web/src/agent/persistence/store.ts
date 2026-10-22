@@ -44,6 +44,7 @@ import {
   AGENT_MESSAGE_MAX_PARTS,
   AGENT_MESSAGE_PARTS_MAX_SERIALIZED_LENGTH,
 } from "@slopcad/api/limits";
+import { randomUUID } from "@slopcad/ui/lib/uuid";
 
 import {
   commitAgentWrite,
@@ -77,7 +78,11 @@ export interface AgentChatStoreDeps {
   readonly sync?: AgentChatSyncConfig;
   /** Injectable clock (tests); defaults to real time. */
   readonly now?: () => Date;
-  /** Injectable id mint (tests); defaults to `crypto.randomUUID()`. */
+  /**
+   * Injectable id mint (tests); defaults to `randomUUID()` — the
+   * `crypto.randomUUID` wrapper with an insecure-context fallback, so
+   * plain-HTTP LAN origins still mint ids.
+   */
   readonly newId?: () => string;
 }
 
@@ -158,7 +163,7 @@ export async function createAgentChatStore(
     deps.persistence,
   );
   const now = deps.now ?? (() => new Date());
-  const newId = deps.newId ?? (() => globalThis.crypto.randomUUID());
+  const newId = deps.newId ?? randomUUID;
   const outbox =
     deps.sync === undefined
       ? null

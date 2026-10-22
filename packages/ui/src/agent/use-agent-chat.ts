@@ -78,6 +78,7 @@ import { useChat } from "@tanstack/ai-react";
 import type { UseChatReturn } from "@tanstack/ai-react";
 import { useMemo, useRef, useState } from "react";
 
+import { randomUUID } from "../lib/uuid";
 import {
   createAgentProviderAdapter,
   type AgentProviderAdapterConfig,
@@ -621,12 +622,12 @@ export function useAgentChat(
   // the render-phase state adjustment (React's adjust-state-when-props-
   // change pattern) so the client swap happens before anything renders.
   const [clientThreadId, setClientThreadId] = useState(
-    () => `slopcad-agent-${globalThis.crypto.randomUUID()}`,
+    () => `slopcad-agent-${randomUUID()}`,
   );
   const transportRef = useRef(transport);
   if (transportRef.current !== transport) {
     transportRef.current = transport;
-    setClientThreadId(`slopcad-agent-${globalThis.crypto.randomUUID()}`);
+    setClientThreadId(`slopcad-agent-${randomUUID()}`);
   }
 
   // The transcript seed for a rebuild: the messages as of the previous
