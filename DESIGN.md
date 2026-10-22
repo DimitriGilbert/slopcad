@@ -7,6 +7,16 @@ not just described: `/design` shows every token and primitive in every
 state, and `apps/web/scripts/design-shots.ts` shoots it across all four
 schemes in both registers.
 
+## The companion law: structure
+
+This file governs how the product LOOKS. `LAYOUT.md` governs how the
+cockpit is BUILT — the five-zone anatomy (top tool strip, left model
+rail, right inspector rail, bottom timeline + status, center viewport +
+HUD), which component fills each zone, and the invariants a zone may not
+break. A surface that is token-correct but zone-wrong is still wrong.
+Read both before touching `apps/web/src/cad-workbench/**` or
+`packages/ui/src/components/cad/**`.
+
 ## The idiom
 
 **Plasticity's restraint with Onshape's information density.** Dark neutral
