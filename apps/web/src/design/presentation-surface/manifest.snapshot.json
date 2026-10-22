@@ -517,6 +517,7 @@
             "apps/web/src/cad-workbench/complete-workbench.tsx",
             "apps/web/src/cad-workbench/curve-overlay.tsx",
             "apps/web/src/cad-workbench/datum-overlay.tsx",
+            "apps/web/src/cad-workbench/drawing-workbench.tsx",
             "apps/web/src/cad-workbench/feature-timeline-strip.tsx",
             "apps/web/src/cad-workbench/hole-ghost.tsx",
             "apps/web/src/cad-workbench/measurement-section.tsx",
@@ -794,6 +795,12 @@
           ]
         },
         {
+          "value": "DXF",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
           "value": "Dynamics scenario",
           "files": [
             "apps/web/src/sim-workbench/dynamics-scenario-form.tsx"
@@ -809,6 +816,12 @@
           "value": "Export",
           "files": [
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "Export SVG preview",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
           ]
         },
         {
@@ -911,6 +924,12 @@
           ]
         },
         {
+          "value": "Load",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
           "value": "Loading",
           "files": [
             "packages/ui/src/agent/chat/spinner.tsx"
@@ -985,9 +1004,21 @@
           ]
         },
         {
+          "value": "PDF",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
           "value": "Primary",
           "files": [
             "apps/web/src/components/header.tsx"
+          ]
+        },
+        {
+          "value": "Print",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
           ]
         },
         {
@@ -1003,10 +1034,22 @@
           ]
         },
         {
+          "value": "Recover model dimensions",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
           "value": "Redo",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+          ]
+        },
+        {
+          "value": "Reference dimension",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
           ]
         },
         {
@@ -1058,6 +1101,12 @@
           ]
         },
         {
+          "value": "Revision row",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
           "value": "Revolve about X",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx"
@@ -1067,6 +1116,12 @@
           "value": "Revolve about Y",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx"
+          ]
+        },
+        {
+          "value": "Save",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
           ]
         },
         {
@@ -1124,6 +1179,18 @@
           ]
         },
         {
+          "value": "SVG",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
+          "value": "Template",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
           "value": "The host contract",
           "files": [
             "apps/web/src/component-preview/agent-chat-preview.tsx"
@@ -1145,6 +1212,12 @@
           "value": "Thicken sheet",
           "files": [
             "apps/web/src/cad-workbench/feature-forms.tsx"
+          ]
+        },
+        {
+          "value": "Title block",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
           ]
         },
         {
@@ -1279,25 +1352,13 @@
           ]
         },
         {
-          "value": "dw-export-heading",
-          "files": [
-            "apps/web/src/cad-workbench/drawing-workbench.tsx"
-          ]
-        },
-        {
-          "value": "dw-furniture-heading",
-          "files": [
-            "apps/web/src/cad-workbench/drawing-workbench.tsx"
-          ]
-        },
-        {
-          "value": "dw-persist-heading",
-          "files": [
-            "apps/web/src/cad-workbench/drawing-workbench.tsx"
-          ]
-        },
-        {
           "value": "dw-sheet-heading",
+          "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx"
+          ]
+        },
+        {
+          "value": "dw-sheet-state-heading",
           "files": [
             "apps/web/src/cad-workbench/drawing-workbench.tsx"
           ]
@@ -8541,6 +8602,7 @@
           "value": "bottom",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx",
+            "apps/web/src/cad-workbench/drawing-workbench.tsx",
             "apps/web/src/cad-workbench/zones/workbench-status-band.tsx",
             "apps/web/src/cad-workbench/zones/workbench-timeline-band.tsx"
           ]
@@ -8549,12 +8611,14 @@
           "value": "center",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx",
+            "apps/web/src/cad-workbench/drawing-workbench.tsx",
             "apps/web/src/cad-workbench/zones/workbench-viewport.tsx"
           ]
         },
         {
           "value": "left",
           "files": [
+            "apps/web/src/cad-workbench/drawing-workbench.tsx",
             "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
           ]
         },
@@ -8569,6 +8633,7 @@
           "value": "top",
           "files": [
             "apps/web/src/cad-workbench/SketchMode.tsx",
+            "apps/web/src/cad-workbench/drawing-workbench.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
           ]
         }

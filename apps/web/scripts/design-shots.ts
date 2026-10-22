@@ -158,6 +158,46 @@ for (const scheme of SCHEMES) {
           .waitFor({ state: "visible", timeout: 30_000 });
       },
     });
+    // The drawing workbench: at boot (no sheet yet — the empty canvas's
+    // own honesty text) and authored (one sheet + the three anchored base
+    // views, so the bed carries the real composed SVG).
+    SHOTS.push({
+      name: `drawings-empty-${scheme}-${theme}`,
+      path: "/drawings",
+      scheme,
+      theme,
+      viewport: { width: 1280, height: 800 },
+      wait: async (page) => {
+        await page
+          .locator("main[data-drawing-boot='ready']")
+          .waitFor({ state: "visible", timeout: 30_000 });
+      },
+    });
+    SHOTS.push({
+      name: `drawings-sheet-${scheme}-${theme}`,
+      path: "/drawings",
+      scheme,
+      theme,
+      viewport: { width: 1280, height: 800 },
+      wait: async (page) => {
+        await page
+          .locator("main[data-drawing-boot='ready']")
+          .waitFor({ state: "visible", timeout: 30_000 });
+        await page.getByRole("button", { name: "Create sheet" }).click();
+        for (const name of ["Front", "Top", "Right"]) {
+          await page.getByRole("button", { name, exact: true }).click();
+        }
+        await page.waitForFunction(() => {
+          const canvas = document.querySelector(
+            '[data-testid="drawing-canvas"]',
+          );
+          return (
+            canvas !== null &&
+            canvas.getAttribute("aria-label")?.includes("3 views") === true
+          );
+        });
+      },
+    });
     // (The old `workbench-midflow-*` shot clicked `body|body_plate` in the
     // tree at boot. The complete workbench now boots an EMPTY document
     // behind its onboarding card, so there is no body to select and no

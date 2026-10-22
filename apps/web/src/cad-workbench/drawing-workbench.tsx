@@ -75,7 +75,43 @@ import {
   viewFitsSheet,
   viewFrameFromGeometry,
 } from "@slopcad/cad-core";
-import { Button } from "@slopcad/ui/components/button";
+import {
+  CircleDot,
+  DraftingCompass,
+  FileCode2,
+  FileImage,
+  FileText,
+  FlipHorizontal2,
+  FoldHorizontal,
+  FolderOpen,
+  History,
+  ImageDown,
+  LayoutTemplate,
+  PanelBottom,
+  Printer,
+  RefreshCw,
+  Ruler,
+  Save,
+  Scissors,
+  Slice,
+  Table,
+  ZoomIn,
+} from "lucide-react";
+import {
+  Panel,
+  PanelBody,
+  PanelSection,
+} from "@slopcad/ui/components/cockpit/panel";
+import {
+  PropertyRow,
+  Readout,
+} from "@slopcad/ui/components/cockpit/property-row";
+import {
+  ToolButton,
+  ToolGroup,
+  ToolValueGroup,
+} from "@slopcad/ui/components/cockpit/tool-button";
+import { ToolStrip } from "@slopcad/ui/components/cockpit/tool-strip";
 import {
   Dialog,
   DialogContent,
@@ -1012,465 +1048,560 @@ export function DrawingWorkbenchPage(): ReactElement {
   const sheet = drawing.sheets[0];
   const { width, height } =
     sheet === undefined ? { width: 0, height: 0 } : sheetDimensions(sheet);
+  const templateName =
+    DRAWING_SHEET_TEMPLATES.find(
+      (template) => template.id === (templateId ?? ""),
+    )?.name ?? "custom sheet";
 
   return (
     <main
-      id="drawing-root"
-      className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 print:max-w-none print:px-0 print:py-0"
+      className="flex h-full min-h-0 flex-col print:block print:h-auto"
       data-drawing-boot={booted ? "ready" : "booting"}
+      id="drawing-root"
     >
       <style dangerouslySetInnerHTML={{ __html: printPageStyle }} />
-      <header className="flex flex-col gap-1 print:hidden">
-        <h1 className="text-2xl font-semibold tracking-tight">Drawings</h1>
-        <p className="text-sm text-muted-foreground">
-          One drawing surface: dimensions recovered from the parametric source,
-          title block and revisions, derived views, BOM tables and balloons.
-          Views of the demo plate project through the edges-overlay fallback —
-          labelled as such, no hidden-line removal; sections hatch their cut
-          faces, details crop at 2:1, and the BOM numbers itself
-          deterministically from the demo assembly structure. Exports
-          (SVG/PDF/DXF) are byte-deterministic.
-        </p>
-      </header>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr] print:block">
-        <aside className="flex flex-col gap-6 print:hidden">
-          <section
-            aria-labelledby="dw-sheet-heading"
-            className="rounded-lg border p-4"
+
+      {/* TOP — the verb strip. Every surface verb is an icon control here:
+          furniture authoring (recover/template/title block/reference/
+          revision), document persistence, and the deterministic output
+          family. None of them is a value selector, so none spends the
+          accent — the surface's ONE confirming action is the sheet form's
+          own submit in the rail. */}
+      <ToolStrip className="print:hidden" data-zone="top" label="Drawing tools">
+        <h1 className="shrink-0 font-display text-title ink">Drawings</h1>
+        <ToolGroup label="Sheet furniture">
+          <ToolButton
+            aria-label="Recover model dimensions"
+            data-testid="drawing-recover"
+            onClick={recover}
+            size="icon"
+            title="Recover the seed model's dimensions and annotations onto the first sheet."
           >
-            <h2 id="dw-sheet-heading" className="mb-3 text-sm font-semibold">
-              New sheet
-            </h2>
-            <sheetForm.Form
-              aria-label="New sheet"
-              className="space-y-3"
-              noValidate
-            />
-          </section>
-          <section
-            aria-labelledby="dw-furniture-heading"
-            className="rounded-lg border p-4"
+            <RefreshCw aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="Template"
+            data-testid="drawing-template-open"
+            onClick={() => {
+              setDialog("template");
+            }}
+            size="icon"
+            title="Pick a pinned sheet template (sizes the sheet)."
           >
-            <h2
-              id="dw-furniture-heading"
-              className="mb-3 text-sm font-semibold"
+            <LayoutTemplate aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="Title block"
+            data-testid="drawing-title-open"
+            onClick={() => {
+              setDialog("titleBlock");
+            }}
+            size="icon"
+            title="Edit the sheet's title block."
+          >
+            <PanelBottom aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="Reference dimension"
+            data-testid="drawing-reference-open"
+            onClick={() => {
+              setDialog("reference");
+            }}
+            size="icon"
+            title="Author a reference dimension."
+          >
+            <Ruler aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="Revision row"
+            data-testid="drawing-revision-open"
+            onClick={() => {
+              setDialog("revision");
+            }}
+            size="icon"
+            title="Add a row to the revision table."
+          >
+            <History aria-hidden="true" />
+          </ToolButton>
+        </ToolGroup>
+        <ToolGroup label="Document">
+          <ToolButton
+            aria-label="Save"
+            onClick={handleSave}
+            size="icon"
+            title="Persist the drawing into a document version."
+          >
+            <Save aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="Load"
+            onClick={handleLoad}
+            size="icon"
+            title="Load the drawing from the document's latest version."
+          >
+            <FolderOpen aria-hidden="true" />
+          </ToolButton>
+        </ToolGroup>
+        <ToolGroup label="Export">
+          <ToolButton
+            aria-label="Export SVG preview"
+            data-testid="drawing-export"
+            onClick={() => {
+              setExportedSvg(svg);
+            }}
+            size="icon"
+            title="Publish the composed sheet's SVG bytes to the status band."
+          >
+            <FileImage aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="SVG"
+            onClick={exportSvg}
+            size="icon"
+            title="Download the sheet as SVG (deterministic bytes)."
+          >
+            <ImageDown aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="PDF"
+            onClick={exportPdf}
+            size="icon"
+            title="Download the drawing document as PDF (deterministic vector bytes)."
+          >
+            <FileText aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="DXF"
+            onClick={exportDxf}
+            size="icon"
+            title="Download the drawing document as DXF (LINE/CIRCLE/TEXT subset)."
+          >
+            <FileCode2 aria-hidden="true" />
+          </ToolButton>
+          <ToolButton
+            aria-label="Print"
+            onClick={handlePrint}
+            size="icon"
+            title="Print one sheet per page at its exact ISO 216 size."
+          >
+            <Printer aria-hidden="true" />
+          </ToolButton>
+        </ToolGroup>
+      </ToolStrip>
+
+      {/* The workspace row: LEFT authoring rail + CENTER sheet bed. */}
+      <div className="flex min-h-0 min-w-0 flex-1 print:block">
+        <Panel
+          className="w-(--rail-w) shrink-0 border-r border-rule print:hidden"
+          data-zone="left"
+          flush
+        >
+          <PanelBody>
+            <PanelSection
+              aria-labelledby="dw-sheet-heading"
+              title={<span id="dw-sheet-heading">New sheet</span>}
             >
-              Sheet furniture
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                data-testid="drawing-recover"
-                onClick={recover}
-                size="sm"
-                variant="outline"
-              >
-                Recover model dimensions
-              </Button>
-              <Button
-                data-testid="drawing-template-open"
-                onClick={() => setDialog("template")}
-                size="sm"
-                variant="outline"
-              >
-                Template
-              </Button>
-              <Button
-                data-testid="drawing-title-open"
-                onClick={() => setDialog("titleBlock")}
-                size="sm"
-                variant="outline"
-              >
-                Title block
-              </Button>
-              <Button
-                data-testid="drawing-reference-open"
-                onClick={() => setDialog("reference")}
-                size="sm"
-                variant="outline"
-              >
-                Reference dimension
-              </Button>
-              <Button
-                data-testid="drawing-revision-open"
-                onClick={() => setDialog("revision")}
-                size="sm"
-                variant="outline"
-              >
-                Revision row
-              </Button>
-              <Button
-                data-testid="drawing-export"
-                onClick={() => setExportedSvg(svg)}
-                size="sm"
-                variant="default"
-              >
-                Export SVG preview
-              </Button>
-            </div>
-          </section>
-          <section
-            aria-labelledby="dw-view-heading"
-            className="rounded-lg border p-4"
-          >
-            <h2 id="dw-view-heading" className="mb-3 text-sm font-semibold">
-              Add base view
-            </h2>
-            <fieldset className="mb-3">
-              <legend className="mb-1 text-xs text-muted-foreground">
-                Projection angle
-              </legend>
-              <div className="flex gap-2">
-                {(["third", "first"] as const).map((value) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    variant={angle === value ? "default" : "outline"}
-                    size="sm"
-                    aria-pressed={angle === value}
-                    onClick={() => setAngle(value)}
-                  >
-                    {value === "third" ? "Third angle" : "First angle"}
-                  </Button>
-                ))}
+              <div className="p-(--pad-panel)">
+                <sheetForm.Form
+                  aria-label="New sheet"
+                  className="space-y-3"
+                  noValidate
+                />
               </div>
-            </fieldset>
-            <div className="grid grid-cols-2 gap-2">
-              {DRAWING_VIEW_KINDS.map((kind) => (
-                <Button
-                  key={kind}
-                  type="button"
-                  size="sm"
-                  onClick={() => addBaseView(kind)}
-                >
-                  {kind === "isometric"
-                    ? "Isometric"
-                    : `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`}
-                </Button>
-              ))}
-            </div>
-          </section>
-          <section
-            aria-labelledby="dw-derived-heading"
-            className="rounded-lg border p-4"
-          >
-            <h2 id="dw-derived-heading" className="mb-3 text-sm font-semibold">
-              Derived views (from Front)
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  addDerivedView(
-                    "front",
-                    (parent) => ({
-                      label: "Left",
-                      projection: {
-                        method: "projected" as const,
-                        parentViewId: parent.id,
-                        direction: "left" as const,
-                      },
-                    }),
-                    0,
-                    "Projected left view",
-                  )
-                }
-              >
-                Projected left
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  addDerivedView(
-                    "front",
-                    (parent) => ({
-                      label: "Back",
-                      projection: {
-                        method: "projected" as const,
-                        parentViewId: parent.id,
-                        direction: "back" as const,
-                      },
-                    }),
-                    1,
-                    "Projected back view",
-                  )
-                }
-              >
-                Projected back
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  addDerivedView(
-                    "front",
-                    () => ({
-                      label: "SECTION A-A",
-                      projection: {
-                        method: "section" as const,
-                        planeOrigin: DEMO_SECTION_PLANE.origin,
-                        planeNormal: DEMO_SECTION_PLANE.normal,
-                        keepSide: 1 as const,
-                        hatchSpacingMm: DEMO_HATCH_SPACING_MM,
-                        hatchAngleRad: Math.PI / 4,
-                      },
-                    }),
-                    2,
-                    "Section view",
-                  )
-                }
-              >
-                Section A-A
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  addDerivedView(
-                    "front",
-                    (parent) => ({
-                      label: "DETAIL B (2:1)",
-                      scale: { numerator: 2, denominator: 1 },
-                      projection: {
-                        method: "detail" as const,
-                        parentViewId: parent.id,
-                        centreU: 30,
-                        centreV: 17,
-                        radiusMm: 12,
-                      },
-                    }),
-                    3,
-                    "Detail view",
-                  )
-                }
-              >
-                Detail B
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  addDerivedView(
-                    "top",
-                    (parent) => ({
-                      label: "Broken-out C-C",
-                      projection: {
-                        method: "broken-out" as const,
-                        parentViewId: parent.id,
-                        bandMinU: DEMO_BREAKOUT_BAND.minU,
-                        bandMaxU: DEMO_BREAKOUT_BAND.maxU,
-                        planeOrigin: DEMO_SECTION_PLANE.origin,
-                        planeNormal: DEMO_SECTION_PLANE.normal,
-                        keepSide: 1 as const,
-                        hatchSpacingMm: DEMO_HATCH_SPACING_MM,
-                      },
-                    }),
-                    4,
-                    "Broken-out section",
-                  )
-                }
-              >
-                Broken-out
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  addDerivedView(
-                    "front",
-                    (parent) => ({
-                      label: "AUX D",
-                      projection: {
-                        method: "auxiliary" as const,
-                        parentViewId: parent.id,
-                        edgeFrom: DEMO_AUX_EDGE.edgeFrom,
-                        edgeTo: DEMO_AUX_EDGE.edgeTo,
-                      },
-                    }),
-                    5,
-                    "Auxiliary view",
-                  )
-                }
-              >
-                Auxiliary D
-              </Button>
-            </div>
-          </section>
-          <section
-            aria-labelledby="dw-callout-heading"
-            className="rounded-lg border p-4"
-          >
-            <h2 id="dw-callout-heading" className="mb-3 text-sm font-semibold">
-              Callouts
-            </h2>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={addBomTable}
-              >
-                Add BOM table
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={addBalloon}
-              >
-                Add balloon
-              </Button>
-            </div>
-          </section>
-          <section
-            aria-labelledby="dw-persist-heading"
-            className="rounded-lg border p-4"
-          >
-            <h2 id="dw-persist-heading" className="mb-3 text-sm font-semibold">
-              Document
-            </h2>
-            <div className="flex gap-2">
-              <Button type="button" size="sm" onClick={handleSave}>
-                Save
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleLoad}
-              >
-                Load
-              </Button>
-            </div>
-          </section>
-          <section
-            aria-labelledby="dw-export-heading"
-            className="rounded-lg border p-4"
-          >
-            <h2 id="dw-export-heading" className="mb-3 text-sm font-semibold">
-              Export
-            </h2>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={exportSvg}
-              >
-                SVG
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={exportPdf}
-              >
-                PDF
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={exportDxf}
-              >
-                DXF
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handlePrint}
-              >
-                Print
-              </Button>
-            </div>
-          </section>
-          {authoringError !== null ? (
-            <p
-              aria-label="Authoring error"
-              className="text-destructive font-mono text-xs"
-              data-testid="drawing-authoring-error"
+            </PanelSection>
+            <PanelSection
+              aria-labelledby="dw-sheet-state-heading"
+              title={<span id="dw-sheet-state-heading">Sheet</span>}
             >
-              {authoringError}
-            </p>
-          ) : null}
-          <p role="status" className="min-h-5 text-xs text-muted-foreground">
-            {status}
-          </p>
-        </aside>
+              {sheet === undefined ? (
+                <p className="px-(--pad-row) py-(--gap) text-ui ink-dim">
+                  no sheet yet
+                </p>
+              ) : (
+                <div className="flex flex-col">
+                  <PropertyRow label="Format">
+                    {`${sheet.size} ${sheet.orientation}`}
+                  </PropertyRow>
+                  <PropertyRow label="Extents" unit="mm">
+                    {`${String(width)} × ${String(height)}`}
+                  </PropertyRow>
+                  <PropertyRow label="Scale">
+                    {`${sheet.scale.numerator}:${sheet.scale.denominator}`}
+                  </PropertyRow>
+                  <PropertyRow label="Views">
+                    {String(sheet.views.length)}
+                  </PropertyRow>
+                  <PropertyRow label="Template">{templateName}</PropertyRow>
+                </div>
+              )}
+            </PanelSection>
+            <PanelSection
+              aria-labelledby="dw-view-heading"
+              title={<span id="dw-view-heading">Add base view</span>}
+            >
+              <div className="flex flex-col gap-(--gap) p-(--pad-panel)">
+                {/* The projection convention and the base-view kind are
+                    VALUE selectors: inset tracks with a seated member, not
+                    accent fills and not confirming actions. The convention
+                    publishes aria-pressed; a kind press ADDS a view, so its
+                    members stay momentary. */}
+                <ToolValueGroup label="Projection angle">
+                  <ToolButton
+                    aria-pressed={angle === "third"}
+                    onClick={() => {
+                      setAngle("third");
+                    }}
+                    size="sm"
+                    tone="value"
+                    type="button"
+                  >
+                    Third angle
+                  </ToolButton>
+                  <ToolButton
+                    aria-pressed={angle === "first"}
+                    onClick={() => {
+                      setAngle("first");
+                    }}
+                    size="sm"
+                    tone="value"
+                    type="button"
+                  >
+                    First angle
+                  </ToolButton>
+                </ToolValueGroup>
+                <ToolValueGroup columns={2} label="Base view kind">
+                  {DRAWING_VIEW_KINDS.map((kind) => (
+                    <ToolButton
+                      key={kind}
+                      onClick={() => {
+                        addBaseView(kind);
+                      }}
+                      size="sm"
+                      tone="value"
+                      type="button"
+                    >
+                      {kind === "isometric"
+                        ? "Isometric"
+                        : `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`}
+                    </ToolButton>
+                  ))}
+                </ToolValueGroup>
+              </div>
+            </PanelSection>
+            <PanelSection
+              aria-labelledby="dw-derived-heading"
+              title={
+                <span id="dw-derived-heading">Derived views (from Front)</span>
+              }
+            >
+              <div className="flex flex-col gap-(--gap-tight) p-(--pad-panel)">
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={() =>
+                    addDerivedView(
+                      "front",
+                      (parent) => ({
+                        label: "Left",
+                        projection: {
+                          method: "projected" as const,
+                          parentViewId: parent.id,
+                          direction: "left" as const,
+                        },
+                      }),
+                      0,
+                      "Projected left view",
+                    )
+                  }
+                  size="sm"
+                  title="Projected left view"
+                  type="button"
+                >
+                  <FoldHorizontal aria-hidden="true" />
+                  <span className="truncate">Projected left</span>
+                </ToolButton>
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={() =>
+                    addDerivedView(
+                      "front",
+                      (parent) => ({
+                        label: "Back",
+                        projection: {
+                          method: "projected" as const,
+                          parentViewId: parent.id,
+                          direction: "back" as const,
+                        },
+                      }),
+                      1,
+                      "Projected back view",
+                    )
+                  }
+                  size="sm"
+                  title="Projected back view"
+                  type="button"
+                >
+                  <FlipHorizontal2 aria-hidden="true" />
+                  <span className="truncate">Projected back</span>
+                </ToolButton>
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={() =>
+                    addDerivedView(
+                      "front",
+                      () => ({
+                        label: "SECTION A-A",
+                        projection: {
+                          method: "section" as const,
+                          planeOrigin: DEMO_SECTION_PLANE.origin,
+                          planeNormal: DEMO_SECTION_PLANE.normal,
+                          keepSide: 1 as const,
+                          hatchSpacingMm: DEMO_HATCH_SPACING_MM,
+                          hatchAngleRad: Math.PI / 4,
+                        },
+                      }),
+                      2,
+                      "Section view",
+                    )
+                  }
+                  size="sm"
+                  title="Section view"
+                  type="button"
+                >
+                  <Slice aria-hidden="true" />
+                  <span className="truncate">Section A-A</span>
+                </ToolButton>
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={() =>
+                    addDerivedView(
+                      "front",
+                      (parent) => ({
+                        label: "DETAIL B (2:1)",
+                        scale: { numerator: 2, denominator: 1 },
+                        projection: {
+                          method: "detail" as const,
+                          parentViewId: parent.id,
+                          centreU: 30,
+                          centreV: 17,
+                          radiusMm: 12,
+                        },
+                      }),
+                      3,
+                      "Detail view",
+                    )
+                  }
+                  size="sm"
+                  title="Detail view"
+                  type="button"
+                >
+                  <ZoomIn aria-hidden="true" />
+                  <span className="truncate">Detail B</span>
+                </ToolButton>
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={() =>
+                    addDerivedView(
+                      "top",
+                      (parent) => ({
+                        label: "Broken-out C-C",
+                        projection: {
+                          method: "broken-out" as const,
+                          parentViewId: parent.id,
+                          bandMinU: DEMO_BREAKOUT_BAND.minU,
+                          bandMaxU: DEMO_BREAKOUT_BAND.maxU,
+                          planeOrigin: DEMO_SECTION_PLANE.origin,
+                          planeNormal: DEMO_SECTION_PLANE.normal,
+                          keepSide: 1 as const,
+                          hatchSpacingMm: DEMO_HATCH_SPACING_MM,
+                        },
+                      }),
+                      4,
+                      "Broken-out section",
+                    )
+                  }
+                  size="sm"
+                  title="Broken-out section"
+                  type="button"
+                >
+                  <Scissors aria-hidden="true" />
+                  <span className="truncate">Broken-out</span>
+                </ToolButton>
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={() =>
+                    addDerivedView(
+                      "front",
+                      (parent) => ({
+                        label: "AUX D",
+                        projection: {
+                          method: "auxiliary" as const,
+                          parentViewId: parent.id,
+                          edgeFrom: DEMO_AUX_EDGE.edgeFrom,
+                          edgeTo: DEMO_AUX_EDGE.edgeTo,
+                        },
+                      }),
+                      5,
+                      "Auxiliary view",
+                    )
+                  }
+                  size="sm"
+                  title="Auxiliary view"
+                  type="button"
+                >
+                  <DraftingCompass aria-hidden="true" />
+                  <span className="truncate">Auxiliary D</span>
+                </ToolButton>
+              </div>
+            </PanelSection>
+            <PanelSection
+              aria-labelledby="dw-callout-heading"
+              title={<span id="dw-callout-heading">Callouts</span>}
+            >
+              <div className="flex flex-col gap-(--gap-tight) p-(--pad-panel)">
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={addBomTable}
+                  size="sm"
+                  title="Add a BOM table (items numbered from the demo assembly)."
+                  type="button"
+                >
+                  <Table aria-hidden="true" />
+                  <span className="truncate">Add BOM table</span>
+                </ToolButton>
+                <ToolButton
+                  className="min-w-0 justify-start"
+                  onClick={addBalloon}
+                  size="sm"
+                  title="Add a balloon on the sheet's first view."
+                  type="button"
+                >
+                  <CircleDot aria-hidden="true" />
+                  <span className="truncate">Add balloon</span>
+                </ToolButton>
+              </div>
+            </PanelSection>
+          </PanelBody>
+        </Panel>
+
+        {/* CENTER — the sheet bed. The drawing canvas is the viewport's
+            own material: the composed SVG sheet lies on the scheme's
+            viewport rung, paper-white in BOTH registers, because a sheet
+            of drafting paper is the content, not the chrome. */}
         <section
           aria-labelledby="dw-canvas-heading"
-          className="flex flex-col gap-3"
+          className="flex min-w-0 flex-1 flex-col bg-viewport print:block print:h-auto"
+          data-zone="center"
         >
-          <h2
-            id="dw-canvas-heading"
-            className="text-sm font-semibold print:hidden"
-          >
-            Canvas
-          </h2>
+          <div className="flex h-(--header-h) shrink-0 items-center gap-(--gap) border-b border-viewport-rule px-(--pad-panel) print:hidden">
+            <span
+              className="label-section text-viewport-ink-dim"
+              id="dw-canvas-heading"
+            >
+              Sheet
+            </span>
+            <span className="ml-auto font-mono text-data text-viewport-ink-dim tabular">
+              {sheet === undefined
+                ? "no sheet"
+                : `${String(width)} × ${String(height)} mm`}
+            </span>
+          </div>
           {drawing.sheets.length === 0 || svg === null ? (
             <div
-              role="img"
               aria-label="Drawing canvas: no sheets yet"
+              className="m-(--gap) flex min-h-0 flex-1 items-center justify-center border border-dashed border-viewport-rule"
               data-testid="drawing-canvas"
-              className="flex h-[560px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground"
+              role="img"
             >
-              No sheets yet — create one to start the drawing.
+              <div className="flex max-w-md flex-col gap-(--gap) px-(--pad-panel) text-center">
+                <p className="text-ui text-viewport-ink">
+                  No sheets yet — create one to start the drawing.
+                </p>
+                <p className="text-micro text-viewport-ink-dim">
+                  Views of the demo plate project through the edges-overlay
+                  fallback — labelled as such, no hidden-line removal; sections
+                  hatch their cut faces, details crop at 2:1, and the BOM
+                  numbers itself deterministically. Exports (SVG/PDF/DXF) are
+                  byte-deterministic.
+                </p>
+              </div>
             </div>
           ) : (
             <div
-              role="img"
               aria-label={drawingSummary(drawing)}
-              data-testid="drawing-canvas"
-              className="h-[560px] overflow-auto rounded-lg border bg-white text-black print:h-auto print:overflow-visible print:rounded-none print:border-0 [&_svg]:h-auto [&_svg]:w-full"
+              className="m-(--gap) min-h-0 flex-1 overflow-auto bg-white text-black print:m-0 print:h-auto print:overflow-visible [&_svg]:h-auto [&_svg]:w-full"
               dangerouslySetInnerHTML={{ __html: svg }}
+              data-testid="drawing-canvas"
+              role="img"
             />
           )}
         </section>
       </div>
+
+      {/* BOTTOM — the status band: the live-region message first (it is
+          the voice of every action above), the authoring error, then the
+          sheet's DRO facts. Every data-* attribute the harness reads is
+          unchanged; only the cells' voices moved to Readout. */}
       <div
-        className="text-muted-foreground flex flex-wrap gap-4 font-mono text-xs print:hidden"
-        data-testid="drawing-status"
-        data-template={templateId ?? ""}
-        data-dims-count={String(furniture?.dimensions.length ?? 0)}
-        data-annotations-count={String(furniture?.annotations.length ?? 0)}
-        data-drawing-values={JSON.stringify(values)}
-        data-revisions={String(furniture?.revisions.length ?? 0)}
-        data-titleblock={JSON.stringify(
-          furniture?.titleBlock ?? {
-            title: "",
-            author: "",
-            material: "",
-            mass: "",
-            scale: "",
-            date: "",
-          },
-        )}
-        data-drawing-svg={exportedSvg ?? ""}
-        data-svg-length={exportedSvg === null ? "" : String(exportedSvg.length)}
-        data-sheet={
-          sheet === undefined ? "" : `${String(width)}x${String(height)}`
-        }
+        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-chrome px-(--pad-panel) print:hidden"
+        data-zone="bottom"
       >
-        <span>
-          {furniture === null
-            ? "no sheet furniture yet"
-            : (DRAWING_SHEET_TEMPLATES.find(
-                (template) => template.id === (templateId ?? ""),
-              )?.name ?? "custom sheet")}
-        </span>
-        <span>{`${String(furniture?.dimensions.length ?? 0)} dimensions`}</span>
-        <span>{`${String(furniture?.annotations.length ?? 0)} annotations`}</span>
-        {exportedSvg !== null ? (
-          <span data-testid="drawing-export-length">{`${String(exportedSvg.length)} bytes exported`}</span>
+        <p className="min-w-0 flex-1 truncate text-ui ink-dim" role="status">
+          {status}
+        </p>
+        {authoringError !== null ? (
+          <p
+            aria-label="Authoring error"
+            className="shrink-0 font-mono text-data text-destructive"
+            data-testid="drawing-authoring-error"
+          >
+            {authoringError}
+          </p>
         ) : null}
+        <div
+          className="flex shrink-0 items-center gap-(--gap-group)"
+          data-annotations-count={String(furniture?.annotations.length ?? 0)}
+          data-dims-count={String(furniture?.dimensions.length ?? 0)}
+          data-drawing-svg={exportedSvg ?? ""}
+          data-drawing-values={JSON.stringify(values)}
+          data-revisions={String(furniture?.revisions.length ?? 0)}
+          data-sheet={
+            sheet === undefined ? "" : `${String(width)}x${String(height)}`
+          }
+          data-svg-length={
+            exportedSvg === null ? "" : String(exportedSvg.length)
+          }
+          data-template={templateId ?? ""}
+          data-testid="drawing-status"
+          data-titleblock={JSON.stringify(
+            furniture?.titleBlock ?? {
+              title: "",
+              author: "",
+              material: "",
+              mass: "",
+              scale: "",
+              date: "",
+            },
+          )}
+        >
+          <Readout label="template">
+            {furniture === null ? "no sheet furniture yet" : templateName}
+          </Readout>
+          <Readout label="dims">
+            {String(furniture?.dimensions.length ?? 0)}
+          </Readout>
+          <Readout label="ann">
+            {String(furniture?.annotations.length ?? 0)}
+          </Readout>
+          {exportedSvg === null ? null : (
+            <Readout
+              data-testid="drawing-export-length"
+              label="exported"
+              unit="bytes"
+            >
+              {String(exportedSvg.length)}
+            </Readout>
+          )}
+        </div>
       </div>
       {dialog === "template" ? (
         <TemplatePickerDialog
