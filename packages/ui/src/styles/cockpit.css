@@ -165,12 +165,21 @@
    * button is the unit of a tool strip, and nothing in a panel is taller
    * than 28px. Every primitive sizes itself from these, so one edit here
    * re-tunes the whole instrument.
+   *
+   * The control ramp is five rungs — 20 / 24 / 28 / 32 / 36 — and it is
+   * the ONLY source of a control's height. `--control-h-lg` and
+   * `--control-h-xl` are the two rungs the wider surfaces (the front
+   * door, the auth forms, the docs shell) stand on; the cockpit itself
+   * never climbs above `--tool-h`, which is why the strip can promise
+   * "nothing inside a panel is taller than a tool button".
    */
   --appbar-h: 2.5rem;
   --row-h: 1.5rem;
   --row-h-lg: 1.75rem;
   --control-h: 1.5rem;
   --control-h-sm: 1.25rem;
+  --control-h-lg: 2rem;
+  --control-h-xl: 2.25rem;
   --tool-h: 1.75rem;
   --header-h: 1.625rem;
   --rail-w: 15rem;
