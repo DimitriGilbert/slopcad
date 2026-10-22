@@ -142,6 +142,9 @@ import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
 import { Button } from "../button";
+import { PanelHeader } from "../cockpit/panel";
+import { ToolButton } from "../cockpit/tool-button";
+import { COCKPIT_FORM } from "./cad-form-density";
 import { useFormedible } from "../formedible/hooks/use-formedible";
 import {
   canonicalDimensionValue,
@@ -587,6 +590,7 @@ export function CadParameterPanel({
 
   const hasParameters = parameters !== undefined && parameters.length > 0;
   const parameterForm = useFormedible<CadParameterPanelFormValues>({
+    ...COCKPIT_FORM,
     fields: formConfig.fields,
     formOptions: {
       defaultValues: formConfig.defaultValues,
@@ -652,30 +656,27 @@ export function CadParameterPanel({
   return (
     <div
       className={cn(
-        "border-border bg-card/60 flex max-h-full min-h-0 flex-col overflow-hidden rounded-md border text-sm",
+        "flex max-h-full min-h-0 flex-col overflow-hidden rounded-md border border-rule bg-panel text-ui",
         className,
       )}
       data-slot="cad-parameter-panel"
     >
-      <div className="text-muted-foreground border-border bg-background/40 shrink-0 border-b px-2.5 py-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em]">
-            {mergedLabels.title}
-          </span>
-          {managerApply === undefined ? null : (
-            <Button
-              aria-pressed={managing}
-              className="tracking-normal normal-case"
-              onClick={() => setManaging((current) => !current)}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
-              {managing ? mergedLabels.manageClose : mergedLabels.manage}
-            </Button>
-          )}
-        </div>
-      </div>
+      {/* The cockpit `PanelHeader`, with the manage toggle living in the
+          strip's own slot: one 26px name band per panel, the section voice
+          once, and the armed treatment of the toggle supplied by
+          `ToolButton` instead of a per-panel ghost button. */}
+      <PanelHeader title={mergedLabels.title}>
+        {managerApply === undefined ? null : (
+          <ToolButton
+            aria-pressed={managing}
+            className="ml-auto"
+            onClick={() => setManaging((current) => !current)}
+            size="sm"
+          >
+            {managing ? mergedLabels.manageClose : mergedLabels.manage}
+          </ToolButton>
+        )}
+      </PanelHeader>
       {managing && managerApply !== undefined ? (
         // The manage mode replaces the edit form (the edit-in-place flow is
         // untouched for the default mode); the manager mirrors the LIVE
@@ -687,14 +688,14 @@ export function CadParameterPanel({
           parameters={collection?.parameters ?? []}
         />
       ) : !hasParameters ? (
-        <div className="text-muted-foreground px-2.5 py-2 text-xs">
+        <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
           {mergedLabels.empty}
-        </div>
+        </p>
       ) : (
         <>
           <parameterForm.Form
             aria-label={mergedLabels.title}
-            className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2.5"
+            className="min-h-0 flex-1 overflow-y-auto p-(--pad-panel)"
             onKeyDown={(event) => {
               // The pinned footer carries the form's only visible submit,
               // so the form restores HTML's implicit Enter submission
@@ -750,7 +751,7 @@ export function CadParameterPanel({
       )}
       {applyFailure !== undefined ? (
         <div
-          className="text-destructive border-border shrink-0 border-t px-2.5 py-1.5 text-xs leading-4"
+          className="shrink-0 border-t border-rule px-(--pad-row) py-(--gap) text-ui text-destructive"
           data-cad-param-panel-error=""
           role="alert"
         >

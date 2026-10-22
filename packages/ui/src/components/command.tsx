@@ -118,7 +118,10 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        "text-foreground overflow-hidden **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:font-mono **:[[cmdk-group-heading]]:text-[10.5px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:tracking-[0.08em] **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase",
+        // The group heading speaks the system's section voice (`label-section`
+        // by value: 10px, +0.08em, upper) in faint ink, on the panel-header
+        // height — the same strip every docked panel wears.
+        "text-ink overflow-hidden **:[[cmdk-group-heading]]:flex **:[[cmdk-group-heading]]:h-(--header-h) **:[[cmdk-group-heading]]:items-center **:[[cmdk-group-heading]]:px-(--pad-row) **:[[cmdk-group-heading]]:text-micro **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:tracking-[0.08em] **:[[cmdk-group-heading]]:text-ink-faint **:[[cmdk-group-heading]]:uppercase",
         className,
       )}
       {...props}
@@ -133,7 +136,7 @@ function CommandSeparator({
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
-      className={cn("-mx-1 h-px bg-border", className)}
+      className={cn("-mx-1 h-px bg-rule", className)}
       {...props}
     />
   );
@@ -148,7 +151,13 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden select-none in-data-[slot=dialog-content]:rounded-sm! data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent data-selected:text-accent-foreground data-selected:shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-selected:*:[svg]:text-accent-foreground",
+        // The highlighted command is a SELECTED ENTITY, so it wears the
+        // system's selection treatment: the row wash plus the signal edge on
+        // the inline start, at the cockpit's row height. It used to paint a
+        // full-width `--accent` fill with its own inset signal ring — the
+        // loudest single element in the palette, and a third dialect of a
+        // state the product already had two spellings for.
+        "group/command-item relative flex min-h-(--row-h) cursor-default items-center gap-(--gap) border-l-2 border-l-transparent rounded-sm px-(--pad-row) text-ui text-ink outline-hidden select-none in-data-[slot=dialog-content]:rounded-sm! data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:border-l-select-edge data-selected:bg-select-wash data-selected:text-select-ink [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}
@@ -167,7 +176,9 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "border-border text-muted-foreground ml-auto rounded-[2px] border bg-background/60 px-1 font-mono text-[10px] leading-4 group-data-selected/command-item:text-accent-foreground",
+        // The shortcut cap is the `KeyCap` treatment by value: the deepest
+        // well, a hairline, faint tabular mono at `--control-h-sm`.
+        "ml-auto inline-flex h-(--control-h-sm) min-w-(--control-h-sm) items-center justify-center rounded-[2px] border border-rule bg-well-deep px-1 font-mono text-micro text-ink-faint tabular",
         className,
       )}
       {...props}

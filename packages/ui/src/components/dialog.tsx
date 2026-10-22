@@ -53,10 +53,20 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay />
+      {/*
+       * The dialog body is the system's `overlay` rung: the only rung that
+       * carries a shadow, and the shadow is `--elevation-overlay` — tinted
+       * to the scheme through `--shadow-ink`, never the untinted black-ish
+       * drop it used to paint. The enclosure is a `rule-strong` hairline
+       * (the system's "encloses" weight) rather than a ring, the radius is
+       * the cockpit's `md` rather than a pill-soft `xl`, and the padding
+       * and gap come off the panel tokens so a dialog and the panel behind
+       * it measure the same.
+       */}
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl bg-popover p-4 text-xs/relaxed text-popover-foreground ring-1 ring-foreground/10 shadow-[0_24px_64px_-16px_color-mix(in_oklch,var(--foreground)_30%,transparent)] duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-(--gap-group) overflow-y-auto rounded-md border border-rule-strong bg-overlay p-(--pad-panel) text-ui text-ink shadow-overlay duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className,
         )}
         {...props}
@@ -86,7 +96,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-1 text-left", className)}
+      className={cn("flex flex-col gap-(--gap-tight) text-left", className)}
       {...props}
     />
   );
@@ -104,7 +114,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        "flex flex-col-reverse gap-(--gap) sm:flex-row sm:justify-end",
         className,
       )}
       {...props}
@@ -123,7 +133,9 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-sm font-medium", className)}
+      // A dialog name is a surface title: the display voice at
+      // `text-title`, the one size the system gives a panel or dialog name.
+      className={cn("text-title font-medium text-ink", className)}
       {...props}
     />
   );
@@ -137,7 +149,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-xs/relaxed text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        "text-body text-ink-dim *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-ink",
         className,
       )}
       {...props}

@@ -25,6 +25,7 @@ import { expressionNumberProblem } from "@slopcad/ui/components/formedible/field
 import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
 import type { TopologySnapshot } from "@slopcad/cad-core";
+import { COCKPIT_FORM } from "@slopcad/ui/components/cad/cad-form-density";
 import {
   DUPLICATE_COUNT_LIMIT,
   HOLE_TYPE_VALUES,
@@ -570,6 +571,7 @@ export function SweepFeatureForm({
     },
   ];
   const form = useFormedible<SweepFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: { pathSketchId: "", profileSketchId: "" },
@@ -583,7 +585,7 @@ export function SweepFeatureForm({
   return (
     <form.Form
       aria-label={labels.sweepTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -645,6 +647,7 @@ export function LoftFeatureForm({
   const first = sketches[0]?.id ?? "";
   const second = sketches[1]?.id ?? "";
   const form = useFormedible<LoftFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -668,9 +671,7 @@ export function LoftFeatureForm({
     resetOnSubmitSuccess: false,
     submitLabel: labels.submit,
   });
-  return (
-    <form.Form aria-label={labels.loftTitle} className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label={labels.loftTitle} noValidate />;
 }
 
 /** The datum payload kinds the creation form builds. */
@@ -778,6 +779,7 @@ export function DatumFeatureForm({
     datumCoordinateField("secondZ", labels.coordinate("Second point z (mm)")),
   ];
   const form = useFormedible<DatumFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -837,9 +839,7 @@ export function DatumFeatureForm({
     resetOnSubmitSuccess: false,
     submitLabel: labels.submit,
   });
-  return (
-    <form.Form aria-label={labels.title} className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label={labels.title} noValidate />;
 }
 
 /** Form values of the curve form — the curve module's authoring shape. */
@@ -893,6 +893,7 @@ export function CurveFeatureForm({
         : {}),
     }));
   const form = useFormedible<CurveFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: { ...CURVE_DEFAULTS },
@@ -916,9 +917,7 @@ export function CurveFeatureForm({
     resetOnSubmitSuccess: false,
     submitLabel: labels.submit,
   });
-  return (
-    <form.Form aria-label={labels.title} className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label={labels.title} noValidate />;
 }
 
 /** Form values of the helix form (spine values: literal or `$name`). */
@@ -1044,6 +1043,7 @@ export function HelixFeatureForm({
     },
   ];
   const form = useFormedible<HelixFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1082,7 +1082,7 @@ export function HelixFeatureForm({
   return (
     <form.Form
       aria-label={labels.helixTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -1201,6 +1201,7 @@ export function ThreadFeatureForm({
   // changes instead of firing on every number-field keystroke.
   const designationRef = useRef("M6");
   const form = useFormedible<ThreadFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1244,7 +1245,7 @@ export function ThreadFeatureForm({
   return (
     <form.Form
       aria-label={labels.threadTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -1295,6 +1296,7 @@ export function RibFeatureForm({
     ),
   ];
   const form = useFormedible<RibFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1311,9 +1313,7 @@ export function RibFeatureForm({
     resetOnSubmitSuccess: false,
     submitLabel: labels.submit,
   });
-  return (
-    <form.Form aria-label={labels.ribTitle} className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label={labels.ribTitle} noValidate />;
 }
 
 /** Form values of the scale form (the factor: literal or `$name`). */
@@ -1420,6 +1420,7 @@ export function CreateSheetForm({
     ),
   ];
   const form = useFormedible<CreateSheetFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1446,7 +1447,7 @@ export function CreateSheetForm({
   return (
     <form.Form
       aria-label="Create base sheet"
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -1510,6 +1511,7 @@ export function TrimSurfaceForm({
     },
   ];
   const form = useFormedible<TrimSurfaceFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1529,7 +1531,7 @@ export function TrimSurfaceForm({
     resetOnSubmitSuccess: false,
     submitLabel: "Trim sheet",
   });
-  return <form.Form aria-label="Trim sheet" className="space-y-3" noValidate />;
+  return <form.Form aria-label="Trim sheet" noValidate />;
 }
 
 /** Form values of the thicken-surface form (Phase 49 surface tab). */
@@ -1587,6 +1589,7 @@ export function ThickenSurfaceForm({
     },
   ];
   const form = useFormedible<ThickenSurfaceFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1606,9 +1609,7 @@ export function ThickenSurfaceForm({
     resetOnSubmitSuccess: false,
     submitLabel: "Thicken sheet",
   });
-  return (
-    <form.Form aria-label="Thicken sheet" className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label="Thicken sheet" noValidate />;
 }
 
 /** Form values of the knit-surface form (Phase 49 surface tab). */
@@ -1673,6 +1674,7 @@ export function KnitSurfaceForm({
   const first = sheets[0]?.id ?? "";
   const second = sheets[1]?.id ?? sheets[0]?.id ?? "";
   const form = useFormedible<KnitSurfaceFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1690,9 +1692,7 @@ export function KnitSurfaceForm({
     resetOnSubmitSuccess: false,
     submitLabel: "Knit sheets",
   });
-  return (
-    <form.Form aria-label="Knit sheets" className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label="Knit sheets" noValidate />;
 }
 
 /** Form values of the offset-surface form (Phase 49 surface tab). */
@@ -1736,6 +1736,7 @@ export function OffsetSurfaceForm({
     ),
   ];
   const form = useFormedible<OffsetSurfaceFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1753,9 +1754,7 @@ export function OffsetSurfaceForm({
     resetOnSubmitSuccess: false,
     submitLabel: "Offset sheet",
   });
-  return (
-    <form.Form aria-label="Offset sheet" className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label="Offset sheet" noValidate />;
 }
 
 /**
@@ -1784,6 +1783,7 @@ export function ScaleFeatureForm({
     ),
   ];
   const form = useFormedible<ScaleFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: { factor: SCALE_DEFAULTS.factor },
@@ -1797,7 +1797,7 @@ export function ScaleFeatureForm({
   return (
     <form.Form
       aria-label={labels.scaleTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -1832,6 +1832,7 @@ export function ThickenFeatureForm({
     ),
   ];
   const form = useFormedible<ThickenFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: { thicknessMm: THICKEN_DEFAULTS.thicknessMm },
@@ -1845,7 +1846,7 @@ export function ThickenFeatureForm({
   return (
     <form.Form
       aria-label={labels.thickenTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -1899,6 +1900,7 @@ export function SplitFeatureForm({
     },
   ];
   const form = useFormedible<SplitFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -1918,7 +1920,7 @@ export function SplitFeatureForm({
   return (
     <form.Form
       aria-label={labels.splitTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -1981,6 +1983,7 @@ export function DraftFeatureForm({
     ),
   ];
   const form = useFormedible<DraftFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2002,7 +2005,7 @@ export function DraftFeatureForm({
   return (
     <form.Form
       aria-label={labels.draftTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -2239,6 +2242,7 @@ export function HoleFeatureForm({
   // only a DESIGNATION change copies the table row's numbers.
   const designationRef = useRef("M6");
   const form = useFormedible<HoleFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2361,9 +2365,7 @@ export function HoleFeatureForm({
     resetOnSubmitSuccess: false,
     submitLabel: labels.submit,
   });
-  return (
-    <form.Form aria-label={labels.holeTitle} className="space-y-3" noValidate />
-  );
+  return <form.Form aria-label={labels.holeTitle} noValidate />;
 }
 
 /** The role's form field name (the spec field names, camelCase + Mm). */
@@ -2510,6 +2512,7 @@ export function PatternFeatureForm({
     },
   ];
   const form = useFormedible<PatternFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2533,7 +2536,7 @@ export function PatternFeatureForm({
   return (
     <form.Form
       aria-label={labels.patternTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -2608,6 +2611,7 @@ export function PatternPathFeatureForm({
     },
   ];
   const form = useFormedible<PatternPathFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2631,7 +2635,7 @@ export function PatternPathFeatureForm({
   return (
     <form.Form
       aria-label={labels.patternPathTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -2704,6 +2708,7 @@ export function BooleanFeatureForm({
     },
   ];
   const form = useFormedible<BooleanFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2733,7 +2738,7 @@ export function BooleanFeatureForm({
   return (
     <form.Form
       aria-label={labels.booleanTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -2787,6 +2792,7 @@ export function MirrorFeatureForm({
     },
   ];
   const form = useFormedible<MirrorFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2806,7 +2812,7 @@ export function MirrorFeatureForm({
   return (
     <form.Form
       aria-label={labels.mirrorTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -2902,6 +2908,7 @@ export function MoveBodyFeatureForm({
     },
   ];
   const form = useFormedible<MoveBodyFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -2933,7 +2940,7 @@ export function MoveBodyFeatureForm({
   return (
     <form.Form
       aria-label={labels.moveBodyTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -3050,6 +3057,7 @@ export function PrimitiveFeatureForm({
     placementField("placeZ", labels.primitivePlaceZ),
   ];
   const form = useFormedible<PrimitiveFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: primitiveFormDefaults(kind),
@@ -3075,7 +3083,7 @@ export function PrimitiveFeatureForm({
   return (
     <form.Form
       aria-label={primitiveFormTitle(kind, labels)}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -3177,6 +3185,7 @@ export function TopologyCutFeatureForm({
     },
   ];
   const form = useFormedible<TopologyCutFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: { sizeMm: TOPOLOGY_CUT_DEFAULT_SIZE_MM[kind] },
@@ -3195,7 +3204,7 @@ export function TopologyCutFeatureForm({
   return (
     <form.Form
       aria-label={topologyCutFormTitle(kind, labels)}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -3319,6 +3328,7 @@ export function FaceOpFeatureForm({
             },
           ];
   const form = useFormedible<FaceOpFormValues>({
+    ...COCKPIT_FORM,
     fields: kindFields,
     formOptions: {
       defaultValues: {
@@ -3343,7 +3353,7 @@ export function FaceOpFeatureForm({
   return (
     <form.Form
       aria-label={faceOpFormTitle(kind, labels)}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -3443,6 +3453,7 @@ export function DuplicateFeatureForm({
     ),
   ];
   const form = useFormedible<DuplicateFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: {
@@ -3477,7 +3488,7 @@ export function DuplicateFeatureForm({
   return (
     <form.Form
       aria-label={labels.duplicateTitle}
-      className="space-y-3"
+
       noValidate
     />
   );
@@ -3516,6 +3527,7 @@ export function BodyRenameForm({
     },
   ];
   const form = useFormedible<BodyRenameFormValues>({
+    ...COCKPIT_FORM,
     fields,
     formOptions: {
       defaultValues: { name: currentName },
@@ -3529,7 +3541,7 @@ export function BodyRenameForm({
   return (
     <form.Form
       aria-label={labels.renameBodyTitle}
-      className="space-y-3"
+
       noValidate
     />
   );

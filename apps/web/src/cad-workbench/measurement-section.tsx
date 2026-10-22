@@ -18,6 +18,8 @@
  */
 
 import type { ReactElement, ReactNode } from "react";
+import { PanelHeader } from "@slopcad/ui/components/cockpit/panel";
+import { PropertyRow } from "@slopcad/ui/components/cockpit/property-row";
 import {
   ToolButton,
   ToolGroup,
@@ -50,8 +52,18 @@ export interface WorkbenchMeasurementSectionProps {
   readonly onToggleSectionViewMode: () => void;
 }
 
-/** One labeled row: muted label left, mono value right. Rendered only
- * when a value exists — an empty instrument row is a lie. */
+/**
+ * One labeled row — the cockpit `PropertyRow`, rendered only when a value
+ * exists (an empty instrument row is a lie).
+ *
+ * The block used to carry its own flex pair with its own gap and ink,
+ * which is how the measurement home drifted off the density contract: the
+ * rows sat at ~22px with 8px of air between them and no separator, so the
+ * same facts the status bar prints as a tight DRO read as a loose list
+ * here. The primitive supplies the 24px, the label voice and the hairline;
+ * every readout's own `id` stays exactly where it was — those ids are the
+ * machine surface the suites assert on.
+ */
 function MeasurementRow({
   label,
   text,
@@ -63,10 +75,16 @@ function MeasurementRow({
 }): ReactElement | null {
   if (text === null) return null;
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="text-right font-mono">{children}</span>
-    </div>
+    /* The flexible column is the VALUE's here, not the label's: a measured
+       extent ("20.000 × 20.000 × 20.000 mm") is far longer than its name,
+       and under the row's default template it pushed "Bounds" into an
+       ellipsis. A readout whose own name is unreadable is not a readout. */
+    <PropertyRow
+      className="grid-cols-[auto_minmax(0,1fr)] items-baseline [&>[data-slot=property-value]]:min-w-0"
+      label={label}
+    >
+      <span className="w-full min-w-0 text-right break-words">{children}</span>
+    </PropertyRow>
   );
 }
 
@@ -93,11 +111,9 @@ export function WorkbenchMeasurementSection({
   return (
     <section
       aria-label="Measurement"
-      className="border-border w-full shrink-0 border-t"
+      className="w-full shrink-0 border-t border-rule"
     >
-      <div className="text-muted-foreground border-border bg-background/30 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-        Measurement
-      </div>
+      <PanelHeader className="bg-well/60" title="Measurement" />
       {/* The Phase 46 section display controls: the persisted plane's clip
           toggle and the view-mode toggle (the cut solid with cap faces).
           Both are ARMED TOOLS, so their pressed appearance is the
@@ -131,14 +147,14 @@ export function WorkbenchMeasurementSection({
         </ToolButton>
       </ToolGroup>
       {measured ? (
-        <div className="flex flex-col gap-2 px-2.5 py-2.5 text-xs">
+        <div className="flex flex-col">
           <MeasurementRow label="Distance" text={distanceText}>
             <span id="workbench-measure-readout" className="block break-words">
               {distanceText}
             </span>
             <span
               id="workbench-distance-source"
-              className="text-muted-foreground block"
+              className="block text-ink-faint"
             >
               {distanceSource}
             </span>
@@ -149,7 +165,7 @@ export function WorkbenchMeasurementSection({
             </span>
             <span
               id="workbench-bounds-tightness"
-              className="text-muted-foreground block"
+              className="block text-ink-faint"
             >
               {boundsState.tightness === "tight"
                 ? "tight"
@@ -163,10 +179,7 @@ export function WorkbenchMeasurementSection({
             <span id="workbench-radius-diameter" className="block break-words">
               {radiusState.diameterText}
             </span>
-            <span
-              id="workbench-radius-source"
-              className="text-muted-foreground block"
-            >
+            <span id="workbench-radius-source" className="block text-ink-faint">
               {radiusState.source}
             </span>
           </MeasurementRow>
@@ -194,14 +207,14 @@ export function WorkbenchMeasurementSection({
             <span
               id="workbench-section-centroid-readout"
               data-testid="section-centroid"
-              className="text-muted-foreground block"
+              className="block text-ink-faint"
             >
               {sectionState.centroidText}
             </span>
           </MeasurementRow>
         </div>
       ) : (
-        <p className="text-muted-foreground px-2.5 py-2.5 font-mono text-[11px]">
+        <p className="px-(--pad-row) py-(--gap) font-mono text-data text-ink-dim">
           select a body to measure
         </p>
       )}

@@ -32,7 +32,9 @@
  */
 
 import { useFormedible } from "../formedible/hooks/use-formedible";
-import { Button } from "../button";
+import { PanelHeader } from "../cockpit/panel";
+import { ToolButton, ToolGroup } from "../cockpit/tool-button";
+import { COCKPIT_FORM } from "./cad-form-density";
 
 /** The panel's user-facing strings (overridable via the `labels` prop). */
 export interface CadConfigurationPanelLabels {
@@ -160,6 +162,7 @@ export function CadConfigurationPanel({
   const labels = { ...CAD_CONFIGURATION_PANEL_LABELS, ...labelOverrides };
 
   const createForm = useFormedible<CreateValues>({
+    ...COCKPIT_FORM,
     fields: CREATE_FIELDS,
     submitButtonClassName: CREATE_SUBMIT_CLASS,
     formOptions: {
@@ -196,16 +199,18 @@ export function CadConfigurationPanel({
       data-testid="cad-configuration-panel"
       data-active-configuration={activeConfigurationId ?? "base"}
       aria-label={labels.title}
-      className={`flex flex-col gap-3 p-3 text-sm ${className}`}
+      className={`flex min-w-0 flex-col text-ui ${className}`}
     >
-      <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        {labels.title}
-      </h3>
+      {/* The panel's name strip is the cockpit `PanelHeader`, keeping its
+          `h3` so the heading stays in the document outline; the padding
+          moved off the panel and onto the body, because the switcher's rows
+          run edge to edge like every other row in the cockpit. */}
+      <PanelHeader title={labels.title} titleAs="h3" />
 
       <fieldset
         role="radiogroup"
         aria-label={labels.switchLegend}
-        className="flex flex-col gap-1"
+        className="flex min-w-0 flex-col"
       >
         <legend className="sr-only">{labels.switchLegend}</legend>
         {[null, ...configurations.map((row) => row.id)].map((id) => {
@@ -243,106 +248,119 @@ export function CadConfigurationPanel({
         })}
       </fieldset>
 
-      {configurations.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{labels.empty}</p>
-      ) : (
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="text-left text-muted-foreground">
-              <th className="py-1 pr-2 font-medium">{labels.title}</th>
-              <th
-                className="py-1 pr-2 font-medium"
-                title={labels.overridesHeading}
-              >
-                {labels.overridesHeading}
-              </th>
-              <th
-                className="py-1 pr-2 font-medium"
-                title={labels.suppressedHeading}
-              >
-                {labels.suppressedHeading}
-              </th>
-              <th
-                className="py-1 pr-2 font-medium"
-                title={labels.hiddenHeading}
-              >
-                {labels.hiddenHeading}
-              </th>
-              <th className="py-1 font-medium">
-                <span className="sr-only">{labels.deleteLabel}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {configurations.map((row) => (
-              <tr key={row.id} className="border-t border-border/60">
-                <td className="max-w-32 truncate py-1 pr-2">{row.name}</td>
-                <td className="py-1 pr-2 tabular-nums">{row.overrides}</td>
-                <td className="py-1 pr-2 tabular-nums">{row.suppressed}</td>
-                <td className="py-1 pr-2 tabular-nums">{row.hidden}</td>
-                <td className="py-1 text-right">
-                  {onDelete === undefined ? null : (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`${labels.deleteLabel}: ${row.name}`}
-                      data-configuration-delete={row.id}
-                      onClick={() => onDelete(row.id)}
-                    >
-                      ×
-                    </Button>
-                  )}
-                </td>
+      <div className="flex min-w-0 flex-col gap-(--gap-group) p-(--pad-panel)">
+        {configurations.length === 0 ? (
+          <p className="text-ui text-ink-dim">{labels.empty}</p>
+        ) : (
+          /* The counts table keeps the row rhythm: `--row-h` cells, the
+             label voice in the head, tabular mono figures, and a hairline
+             between rows instead of a boxed grid. */
+          <table className="w-full border-collapse text-ui">
+            <thead>
+              <tr className="text-left">
+                <th className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim">
+                  {labels.title}
+                </th>
+                <th
+                  className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim"
+                  title={labels.overridesHeading}
+                >
+                  {labels.overridesHeading}
+                </th>
+                <th
+                  className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim"
+                  title={labels.suppressedHeading}
+                >
+                  {labels.suppressedHeading}
+                </th>
+                <th
+                  className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim"
+                  title={labels.hiddenHeading}
+                >
+                  {labels.hiddenHeading}
+                </th>
+                <th className="h-(--row-h)">
+                  <span className="sr-only">{labels.deleteLabel}</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {onCreate === undefined ? null : <createForm.Form />}
-
-      <div className="flex gap-2">
-        {onExportCsv === undefined ? null : (
-          <Button type="button" variant="outline" size="sm" onClick={exportCsv}>
-            {labels.exportCsv}
-          </Button>
+            </thead>
+            <tbody>
+              {configurations.map((row) => (
+                <tr key={row.id} className="border-t border-rule/60">
+                  <td className="h-(--row-h) max-w-32 truncate pr-(--gap)">
+                    {row.name}
+                  </td>
+                  <td className="h-(--row-h) pr-(--gap) font-mono text-data tabular">
+                    {row.overrides}
+                  </td>
+                  <td className="h-(--row-h) pr-(--gap) font-mono text-data tabular">
+                    {row.suppressed}
+                  </td>
+                  <td className="h-(--row-h) pr-(--gap) font-mono text-data tabular">
+                    {row.hidden}
+                  </td>
+                  <td className="h-(--row-h) text-right">
+                    {onDelete === undefined ? null : (
+                      <ToolButton
+                        aria-label={`${labels.deleteLabel}: ${row.name}`}
+                        className="w-(--control-h) justify-center px-0"
+                        data-configuration-delete={row.id}
+                        onClick={() => onDelete(row.id)}
+                        size="sm"
+                        tone="destructive"
+                      >
+                        ×
+                      </ToolButton>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-        {onImportCsv === undefined ? null : (
-          /*
-           * A native file input renders the browser's own "Choose File /
-           * No file chosen" control, which in a CAD rail reads as an
-           * unstyled escape hatch (and overflowed it). The input keeps its
-           * testid and its accessible name — it is still the real control,
-           * and the label still activates it — but it stops drawing
-           * itself, and the label wears the product's control treatment.
-           */
-          <label className="inline-flex h-(--tool-h) cursor-pointer items-center gap-1.5 rounded-sm border border-rule bg-panel px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) hover:bg-well hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)">
-            <span>{labels.importCsv}</span>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              aria-label={labels.importCsv}
-              data-testid="cad-configuration-csv-input"
-              onChange={(event) => {
-                void importCsv(event.target.files);
-                event.target.value = "";
-              }}
-              className="sr-only"
-            />
-          </label>
+
+        {onCreate === undefined ? null : <createForm.Form />}
+
+        <ToolGroup label="Parameter table" separated={false}>
+          {onExportCsv === undefined ? null : (
+            <ToolButton onClick={exportCsv}>{labels.exportCsv}</ToolButton>
+          )}
+          {onImportCsv === undefined ? null : (
+            /*
+             * A native file input renders the browser's own "Choose File /
+             * No file chosen" control, which in a CAD rail reads as an
+             * unstyled escape hatch (and overflowed it). The input keeps its
+             * testid and its accessible name — it is still the real control,
+             * and the label still activates it — but it stops drawing
+             * itself, and the label wears the product's control treatment.
+             */
+            <label className="inline-flex h-(--tool-h) cursor-pointer items-center gap-(--gap) rounded-sm border border-transparent px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)">
+              <span>{labels.importCsv}</span>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                aria-label={labels.importCsv}
+                data-testid="cad-configuration-csv-input"
+                onChange={(event) => {
+                  void importCsv(event.target.files);
+                  event.target.value = "";
+                }}
+                className="sr-only"
+              />
+            </label>
+          )}
+        </ToolGroup>
+
+        {notice === null ? null : (
+          <p
+            role="alert"
+            data-testid="cad-configuration-notice"
+            className="text-ui text-destructive"
+          >
+            {notice}
+          </p>
         )}
       </div>
-
-      {notice === null ? null : (
-        <p
-          role="alert"
-          data-testid="cad-configuration-notice"
-          className="text-xs text-destructive"
-        >
-          {notice}
-        </p>
-      )}
     </section>
   );
 }

@@ -9,6 +9,8 @@
  *
  *   boot      the empty document behind its onboarding card
  *   palette   the command menu open over the cockpit (Ctrl/Cmd+K)
+ *   dialog    a feature create dialog open over the cockpit — the forms
+ *             surface, which nothing else in the matrix shows
  *   modeled   a real body created through the command menu + its dialog
  *   selected  that body selected in the model tree — the selection chain
  *             lit end to end (tree row, properties, measurement, DRO)
@@ -109,13 +111,21 @@ async function walk(
     await page.keyboard.press("Escape");
   }
 
-  if (states.includes("modeled") || states.includes("selected")) {
+  if (
+    states.includes("dialog") ||
+    states.includes("modeled") ||
+    states.includes("selected")
+  ) {
     // A real body, authored through the product's own affordance: the
     // onboarding card's "Add a box" opens the box feature dialog (the
     // command menu's vocabulary carries operations, not primitives).
     await page.getByTestId("workbench-sketch-hint-primitive").click();
-    await page
-      .locator("[role='dialog']")
+    const dialog = page.getByTestId("feature-form-dialog");
+    await dialog.waitFor({ timeout: 30_000 });
+    if (states.includes("dialog")) {
+      await shoot(page, `workbench-dialog-${suffix}`, taken);
+    }
+    await dialog
       .getByRole("button", { name: "Create" })
       .click({ timeout: 30_000 });
     await waitSettled(page);
@@ -148,7 +158,7 @@ async function main(): Promise<void> {
         scheme,
         register,
         1280,
-        ["boot", "palette", "modeled", "selected"],
+        ["boot", "palette", "dialog", "modeled", "selected"],
         taken,
       );
       await walk(browser, scheme, register, 768, ["modeled"], taken);

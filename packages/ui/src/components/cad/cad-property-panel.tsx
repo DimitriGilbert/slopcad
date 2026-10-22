@@ -79,6 +79,8 @@ import {
 import { cn } from "cn";
 
 import { Button } from "../button";
+import { PanelHeader } from "../cockpit/panel";
+import { PropertyRow as CockpitPropertyRow } from "../cockpit/property-row";
 
 /** The user-facing strings of {@link CadPropertyPanel}. Overridable via props. */
 export interface CadPropertyPanelLabels {
@@ -201,10 +203,14 @@ export interface CadPropertyPanelProps {
 const STATUS_PRESENTATION: Readonly<
   Record<FeatureRegenerationStatus["state"], string>
 > = Object.freeze({
-  valid: "text-muted-foreground",
-  stale: "text-amber-600 dark:text-amber-400",
+  valid: "text-ink-dim",
+  // `stale` is a WARN status, so it rides the system's warn colour (the
+  // one `StatusDot` uses) instead of a raw Tailwind amber — a second amber
+  // family beside the scheme's own signal was two accents pretending to be
+  // one.
+  stale: "text-signal",
   failed: "text-destructive font-medium",
-  suppressed: "text-muted-foreground italic",
+  suppressed: "text-ink-dim italic",
 });
 
 /** One name-resolved piece of an input summary: what the ref points at. */
@@ -249,31 +255,43 @@ function consumingFeaturesOf(
   );
 }
 
-/** The panel's shared row: a muted label left, the value right, mono. */
+/**
+ * The panel's shared row — the cockpit `PropertyRow`, not a second
+ * implementation of it.
+ *
+ * This file used to carry its own name/value row: a flex pair with its own
+ * gap, its own label ink and its own optional mono switch, re-deciding
+ * locally what the design system already fixes (24px, label left in
+ * `text-label` dim ink, tabular mono value right, a hairline instead of
+ * air). That is exactly the drift DESIGN.md's density contract exists to
+ * prevent, so the local row is now a thin adapter: it maps this panel's
+ * (label, value, tone) shape onto the primitive and adds nothing of its
+ * own but the status tone.
+ */
 function PropertyRow({
   label,
   value,
   valueClassName,
-  mono = true,
 }: {
   readonly label: string;
   readonly value: string;
   readonly valueClassName?: string;
-  readonly mono?: boolean;
 }): ReactElement {
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground shrink-0">{label}</span>
+    <CockpitPropertyRow
+      // A property VALUE here can be a joined list of feature kinds, so the
+      // value column takes the flexible track and is allowed to shrink and
+      // wrap; the label (one word) keeps its intrinsic width instead of
+      // ellipsising under it.
+      className="grid-cols-[auto_minmax(0,1fr)] items-baseline [&>[data-slot=property-value]]:min-w-0"
+      label={label}
+    >
       <span
-        className={cn(
-          "min-w-0 text-right break-words",
-          mono && "font-mono",
-          valueClassName,
-        )}
+        className={cn("w-full min-w-0 text-right break-words", valueClassName)}
       >
         {value}
       </span>
-    </div>
+    </CockpitPropertyRow>
   );
 }
 
@@ -358,12 +376,7 @@ function PropertySection({
     } else {
       removableFeatureId = feature.id;
       rows.push(
-        <PropertyRow
-          key="kind"
-          label={labels.rowKind}
-          value={feature.kind}
-          mono={false}
-        />,
+        <PropertyRow key="kind" label={labels.rowKind} value={feature.kind} />,
       );
       rows.push(
         <PropertyRow
@@ -378,7 +391,6 @@ function PropertySection({
             key="status"
             label="Status"
             value={status.state}
-            mono={false}
             valueClassName={STATUS_PRESENTATION[status.state]}
           />,
         );
@@ -421,19 +433,13 @@ function PropertySection({
         key="name"
         label={labels.rowName}
         value={body === undefined ? String(bodyId) : body.name}
-        mono={body === undefined}
       />,
     );
     rows.push(
       <PropertyRow key="id" label={labels.rowId} value={String(bodyId)} />,
     );
     rows.push(
-      <PropertyRow
-        key="kind"
-        label={labels.rowKind}
-        value={reference.kind}
-        mono={false}
-      />,
+      <PropertyRow key="kind" label={labels.rowKind} value={reference.kind} />,
     );
     if (reference.kind === "body") {
       const producer = producingFeatureOf(document, bodyId);
@@ -442,7 +448,6 @@ function PropertySection({
           key="produced-by"
           label={labels.rowProducedBy}
           value={producer === undefined ? unset : producer.kind}
-          mono={producer === undefined}
         />,
       );
       const consumers = consumingFeaturesOf(document, bodyId);
@@ -496,36 +501,43 @@ function PropertySection({
   return (
     <section
       aria-describedby={failureId}
-      className="border-border/60 border-b last:border-b-0"
+      className="border-b border-rule-strong last:border-b-0"
       data-cad-property-section=""
       data-reference-kind={reference.kind}
     >
-      <div className="flex flex-col gap-1.5 px-2.5 py-2 text-xs">
-        {rows}
-        {failure !== undefined ? (
-          <div
-            className="text-destructive leading-4"
-            id={failureId}
-            title={failure.map((diagnostic) => diagnostic.message).join("\n")}
-          >
-            {failure[0]?.message}
-          </div>
-        ) : null}
-        {removableFeatureId !== undefined && onRemove !== undefined ? (
-          <Button
-            data-testid={`cad-property-remove-${String(index)}`}
-            onClick={() => {
-              onRemove(removableFeatureId);
-            }}
-            size="xs"
-            title={labels.removeTooltip}
-            type="button"
-            variant="destructive"
-          >
-            {labels.remove}
-          </Button>
-        ) : null}
-      </div>
+      {/* The rows run flush: each one carries its own hairline and its own
+          24px, so a wrapping stack with a gap would re-space the density
+          contract from outside it. Only the section's extras (a failure
+          line, the remove verb) get panel padding. */}
+      {rows}
+      {failure !== undefined || removableFeatureId !== undefined ? (
+        <div className="flex flex-col gap-(--gap) px-(--pad-row) py-(--gap)">
+          {failure !== undefined ? (
+            <div
+              className="text-destructive text-ui"
+              id={failureId}
+              title={failure.map((diagnostic) => diagnostic.message).join("\n")}
+            >
+              {failure[0]?.message}
+            </div>
+          ) : null}
+          {removableFeatureId !== undefined && onRemove !== undefined ? (
+            <Button
+              className="self-start"
+              data-testid={`cad-property-remove-${String(index)}`}
+              onClick={() => {
+                onRemove(removableFeatureId);
+              }}
+              size="xs"
+              title={labels.removeTooltip}
+              type="button"
+              variant="destructive"
+            >
+              {labels.remove}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -581,27 +593,30 @@ export function CadPropertyPanel({
   return (
     <div
       className={cn(
-        "border-border bg-card/60 w-72 overflow-hidden rounded-md border text-sm",
+        "w-(--rail-w) overflow-hidden rounded-md border border-rule bg-panel text-ui",
         className,
       )}
       data-slot="cad-property-panel"
     >
-      <div className="text-muted-foreground border-border bg-background/40 flex items-baseline justify-between border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-        <span>{labels.title}</span>
-        {cadDocument !== undefined ? (
-          <span className="text-signal font-mono normal-case">
-            {String(selection.length)}
-          </span>
-        ) : null}
-      </div>
+      {/* The name strip is the cockpit `PanelHeader`: one fixed height, the
+          section voice, and the selection count in the trailing slot. The
+          count used to be printed in the SIGNAL colour — an accent spent on
+          a number, which is the one thing DESIGN.md says it may never
+          decorate. */}
+      <PanelHeader
+        title={labels.title}
+        trailing={
+          cadDocument === undefined ? undefined : String(selection.length)
+        }
+      />
       {cadDocument === undefined ? (
-        <div className="text-muted-foreground px-2.5 py-2 text-xs">
+        <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
           {labels.emptyDocument}
-        </div>
+        </p>
       ) : selection.length === 0 ? (
-        <div className="text-muted-foreground px-2.5 py-2 text-xs">
+        <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
           {labels.emptySelection}
-        </div>
+        </p>
       ) : (
         <>
           {selection.map((reference, index) => (
@@ -629,7 +644,7 @@ export function CadPropertyPanel({
           ))}
           {removeFailure !== undefined ? (
             <div
-              className="text-destructive border-border border-t px-2.5 py-1.5 text-xs leading-4"
+              className="border-t border-rule px-(--pad-row) py-(--gap) text-ui text-destructive"
               data-cad-property-error=""
               role="alert"
             >
