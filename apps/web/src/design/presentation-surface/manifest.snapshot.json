@@ -525,7 +525,6 @@
             "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
             "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
-            "apps/web/src/cad-workbench/zones/workbench-viewport.tsx",
             "apps/web/src/component-preview/ComponentPreviewPage.tsx",
             "apps/web/src/components/header.tsx",
             "apps/web/src/components/scheme-picker.tsx",

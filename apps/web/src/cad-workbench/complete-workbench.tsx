@@ -341,6 +341,10 @@ export function CompleteWorkbenchStatusBar({
   return (
     <CadStatusBar
       className={className}
+      // The DRO band owns the live facts (the armed tool, the selection
+      // count); the strip keeps the command count and the session spans —
+      // each fact prints exactly once on the frame's bottom edge.
+      fields={["commands"]}
       surfaceIds={{
         statusId: "workbench-complete-status",
         volumeId: "workbench-complete-volume",
@@ -2121,27 +2125,7 @@ export function CompleteCadWorkbench({
     <WorkbenchViewport
       dro={{
         armedToolId: toolsApi.phase === "active" ? toolsApi.activeToolId : null,
-        document:
-          applied === null
-            ? null
-            : {
-                extentsText: formatBoundsExtents(
-                  applied.state.measurement.bounds,
-                ),
-                sceneKind: engine.activeScene,
-                triangles: String(applied.state.measurement.triangles),
-                volumeText: applied.state.measurement.volume.toFixed(3),
-              },
-        preview:
-          ioSurface.preview === null
-            ? null
-            : {
-                source: ioSurface.preview.source,
-                triangles: String(ioSurface.preview.triangles),
-                volumeText: ioSurface.preview.volumeText,
-              },
         selectionCount: selectionApi.selected.length,
-        settled: !showingPreview && applied !== null,
         showingPreview,
       }}
       onFramePointerDown={handleTopologyPickPointer}
@@ -2567,9 +2551,21 @@ export function CompleteCadWorkbench({
         }
         featureCount={timeline === null ? null : timeline.length}
         hidden={mode === "sketch"}
+        preview={
+          ioSurface.preview === null
+            ? null
+            : {
+                source: ioSurface.preview.source,
+                triangles: String(ioSurface.preview.triangles),
+                volumeText: ioSurface.preview.volumeText,
+              }
+        }
         sceneKind={showingPreview ? "import" : engine.activeScene}
         settled={settled}
         statusBar={statusBar}
+        triangles={
+          applied === null ? null : String(applied.state.measurement.triangles)
+        }
       />
       {ioDialogs}
       {/* The Phase 38 feature dialog: one kind-switched surface hosting the

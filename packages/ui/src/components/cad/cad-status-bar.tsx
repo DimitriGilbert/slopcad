@@ -80,6 +80,16 @@ export interface CadStatusBarSurfaceIds {
   readonly errorId?: string;
 }
 
+/** The store-mirrored fields the bar can print. */
+export type CadStatusBarField = "commands" | "selection" | "tool";
+
+/** Every mirrored field — the default `fields` list. */
+const CAD_STATUS_BAR_FIELDS: readonly CadStatusBarField[] = [
+  "tool",
+  "selection",
+  "commands",
+];
+
 /** Props of {@link CadStatusBar}. */
 export interface CadStatusBarProps {
   /** The host surface ids to render as labeled spans. */
@@ -92,6 +102,16 @@ export interface CadStatusBarProps {
   readonly selectionCount?: number;
   /** The committed command count; overrides the mirrored value. */
   readonly commandCount?: number;
+  /**
+   * Which mirrored fields render; defaults to all three. Pass the kept
+   * list when a sibling surface already prints a fact — the complete
+   * workbench's DRO band owns the armed tool and the selection count, so
+   * its strip keeps only `commands` and no fact renders twice on one
+   * glance. The surface-id spans (status, volume, error) are the host's
+   * own surfaces rather than mirrors: they render whenever their id is
+   * supplied, regardless of this list.
+   */
+  readonly fields?: readonly CadStatusBarField[];
   /** Label token overrides, merged over {@link CAD_STATUS_BAR_LABELS}. */
   readonly labels?: Partial<CadStatusBarLabels>;
   /** Extends the container classes. */
@@ -173,6 +193,7 @@ function StatusField({
  */
 export function CadStatusBar({
   commandCount: commandCountProp,
+  fields = CAD_STATUS_BAR_FIELDS,
   labels: labelOverrides,
   selectionCount: selectionCountProp,
   surfaceIds,
@@ -231,17 +252,17 @@ export function CadStatusBar({
           {labels.volumeUnit}
         </StatusField>
       ) : null}
-      {toolPhase !== undefined ? (
+      {fields.includes("tool") && toolPhase !== undefined ? (
         <StatusField label={labels.tool}>
           {`${toolId ?? "none"} (${toolPhase})`}
         </StatusField>
       ) : null}
-      {selectionCount !== undefined ? (
+      {fields.includes("selection") && selectionCount !== undefined ? (
         <StatusField label={labels.selection}>
           {String(selectionCount)}
         </StatusField>
       ) : null}
-      {commandCount !== undefined ? (
+      {fields.includes("commands") && commandCount !== undefined ? (
         <StatusField label={labels.commands}>
           {String(commandCount)}
         </StatusField>

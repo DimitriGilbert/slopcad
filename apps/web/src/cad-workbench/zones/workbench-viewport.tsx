@@ -17,10 +17,12 @@
  * - the **HUD**, as `CadViewportHud`'s NAMED corners (the host supplies
  *   what goes in each; the zone owns where they are and the
  *   pointer-events discipline);
- * - the **DRO band** — the viewport's own bottom edge, because it reads
- *   the camera and the picked entity, not the document's history. The
- *   band is rendered from a DATA descriptor here, so the cockpit no longer
- *   carries 90 lines of readout markup.
+ * - the **DRO band** — the viewport's own bottom edge. It prints the
+ *   LIVE facts — the armed tool, the selection count, the pick seam —
+ *   the facts that change per action. The document's facts (scene kind,
+ *   extents, volume, triangles, the settle lamp) live in the status band
+ *   below the frame: one fact, one place, never printed twice ~60px
+ *   apart.
  *
  * The canvas itself stays the host's element: the engine owns the
  * projection, the camera session and the settle protocol, and threading
@@ -30,25 +32,14 @@
 
 import type { ReactElement, ReactNode } from "react";
 
-/** The DRO band's facts — formatted by their owner, printed here. */
+/** The DRO band's facts — the live ones only, formatted by their owner. */
 export interface WorkbenchViewportDro {
-  /** Whether an import preview owns the stage (the band swaps vocabulary). */
+  /**
+   * Whether an import preview owns the stage. The band prints no scene
+   * facts either way — `WorkbenchStatusBand` owns those — but the frame's
+   * `data-viewport-showing` stamp still reports what the stage holds.
+   */
   readonly showingPreview: boolean;
-  /** Whether the rendered frame agrees with the document (the lamp). */
-  readonly settled: boolean;
-  /** The import preview's facts, when one is showing. */
-  readonly preview: {
-    readonly source: string;
-    readonly triangles: string;
-    readonly volumeText: string;
-  } | null;
-  /** The document's facts, or `null` while the scene computes. */
-  readonly document: {
-    readonly sceneKind: string;
-    readonly extentsText: string;
-    readonly volumeText: string;
-    readonly triangles: string;
-  } | null;
   /** The armed tool's id, or `null` when nothing is armed. */
   readonly armedToolId: string | null;
   /** How many references the selection holds. */
@@ -111,78 +102,31 @@ export function WorkbenchViewport({
       >
         {children}
       </div>
-      {/* The DRO band: the viewport region's readout, edge to edge along
-          its bottom — the same honest engine numbers the machine surfaces
-          carry (scene kind, extents, volume, triangles), plus the settle
-          lamp and the live tool state. Never a second source of truth. In
-          the dark register the band reads as an emissive instrument: amber
-          digits over near-black glass (the cockpit's glance-mark); light
-          stays plain ink on paper. */}
+      {/* The DRO band: the viewport region's LIVE readout, edge to edge
+          along its bottom — what is armed, how many references are held,
+          and whether the frame is picking. The document's numbers (scene,
+          extents, volume, triangles) and the settle lamp live in the
+          status band below: each fact prints exactly once, so an operator
+          never reads two values for one truth. In the dark register the
+          band reads as an emissive instrument: plain digits over
+          near-black glass; light stays plain ink on paper. */}
       <div
-        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-well px-(--pad-panel) font-mono text-data whitespace-nowrap ink-dim"
+        className="flex h-7 shrink-0 items-center justify-end gap-(--gap-group) overflow-hidden border-t border-rule bg-well px-(--pad-panel) font-mono text-data whitespace-nowrap ink-dim"
         data-testid="viewport-dro"
       >
-        <span
-          aria-hidden="true"
-          className={`size-1.5 shrink-0 rounded-full ${
-            dro.settled ? "bg-status-ok" : "bg-signal motion-safe:animate-pulse"
-          }`}
-        />
-        {/* The static facts: the band's shrinkable half. */}
-        <div className="flex min-w-0 items-center gap-(--gap-group) overflow-hidden">
-          {dro.showingPreview ? (
-            <>
-              <span className="ink tabular">
-                import · {dro.preview?.source ?? ""}
-              </span>
-              <span>
-                tris <span className={DRO_VALUE}>{dro.preview?.triangles}</span>
-              </span>
-              <span>
-                vol{" "}
-                <span className={DRO_VALUE}>
-                  {dro.preview === null ? "…" : `${dro.preview.volumeText} mm³`}
-                </span>
-              </span>
-              <span>geometry only, not in the document</span>
-            </>
-          ) : dro.document === null ? (
-            <span className="ink tabular">computing…</span>
-          ) : (
-            <>
-              <span className="ink tabular">{dro.document.sceneKind}</span>
-              <span>
-                extents{" "}
-                <span className={DRO_VALUE}>{dro.document.extentsText}</span>
-              </span>
-              <span>
-                vol{" "}
-                <span className={DRO_VALUE}>
-                  {`${dro.document.volumeText} mm³`}
-                </span>
-              </span>
-              <span>
-                tris <span className={DRO_VALUE}>{dro.document.triangles}</span>
-              </span>
-            </>
-          )}
-        </div>
-        {/* The live tool state rides the DRO's right end: what is armed,
-            and how it cancels. It used to be `hidden … sm:flex` — the
-            most VOLATILE fact in the band, deleted by viewport width.
-            It is `shrink-0` now instead: the band's static facts (scene,
-            extents, volume, triangles) give up their width first, and
-            what is armed is always on screen. */}
-        <span className="ml-auto flex shrink-0 items-center gap-(--gap-group)">
-          {dro.armedToolId === null ? null : (
-            <span>
-              tool <span className="ink tabular">{dro.armedToolId}</span> · Esc
-              cancels
-            </span>
-          )}
+        {topologyPickingVerb === undefined ? null : (
           <span>
-            sel <span className={DRO_VALUE}>{String(dro.selectionCount)}</span>
+            pick <span className="ink tabular">{topologyPickingVerb}</span>
           </span>
+        )}
+        {dro.armedToolId === null ? null : (
+          <span>
+            tool <span className="ink tabular">{dro.armedToolId}</span> · Esc
+            cancels
+          </span>
+        )}
+        <span>
+          sel <span className={DRO_VALUE}>{String(dro.selectionCount)}</span>
         </span>
       </div>
     </div>

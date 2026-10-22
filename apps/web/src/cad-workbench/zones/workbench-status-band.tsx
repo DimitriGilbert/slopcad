@@ -40,6 +40,20 @@ export interface WorkbenchStatusBandProps {
   readonly sceneKind: string;
   /** The settled extents text, or `null` while the scene is computing. */
   readonly extentsText: string | null;
+  /** The document's triangle count, or `null` while the scene computes. */
+  readonly triangles: string | null;
+  /**
+   * The import preview's facts while one owns the stage, or `null`. The
+   * plate follows the stage (the scene cell already reads `"import"` for
+   * a preview), so while a mesh is being inspected the plate prints the
+   * import's own tris and volume — the document's numbers are not the
+   * thing on the bed.
+   */
+  readonly preview: {
+    readonly source: string;
+    readonly triangles: string;
+    readonly volumeText: string;
+  } | null;
   /** The feature count, or `null` before the timeline exists. */
   readonly featureCount: number | null;
   /** The `statusBar` slot's node (see the chrome/content contract above). */
@@ -60,9 +74,11 @@ export function WorkbenchStatusBand({
   extentsText,
   featureCount,
   hidden = false,
+  preview = null,
   sceneKind,
   settled,
   statusBar,
+  triangles,
 }: WorkbenchStatusBandProps): ReactElement {
   return (
     <div
@@ -83,16 +99,36 @@ export function WorkbenchStatusBand({
         }
         tone={settled ? "ok" : "idle"}
       />
-      {/* The document plate: what this document IS, live. */}
+      {/* The document plate: what the stage IS, live — the document's
+          own facts while the document is on the bed (scene, extents,
+          triangles, features — the volume the session writer settles
+          rides the status strip beside it), the import preview's while
+          a mesh is being inspected. The DRO band above used to print the
+          same numbers; it keeps the live facts now, one place each. */}
       <div
         aria-label="Document"
         className="flex shrink-0 items-center gap-(--gap-group)"
         role="group"
       >
-        <Readout label="scene">{sceneKind}</Readout>
-        <Readout label="extents">{extentsText ?? "computing…"}</Readout>
-        {featureCount === null ? null : (
-          <Readout label="features">{String(featureCount)}</Readout>
+        {preview === null ? (
+          <>
+            <Readout label="scene">{sceneKind}</Readout>
+            <Readout label="extents">{extentsText ?? "computing…"}</Readout>
+            {triangles === null ? null : (
+              <Readout label="tris">{triangles}</Readout>
+            )}
+            {featureCount === null ? null : (
+              <Readout label="features">{String(featureCount)}</Readout>
+            )}
+          </>
+        ) : (
+          <>
+            <Readout label="scene">{`${sceneKind} · ${preview.source}`}</Readout>
+            <Readout label="tris">{preview.triangles}</Readout>
+            <Readout label="vol" unit="mm³">
+              {preview.volumeText}
+            </Readout>
+          </>
         )}
       </div>
       <div className="flex min-w-0 flex-1 items-center">{statusBar}</div>
