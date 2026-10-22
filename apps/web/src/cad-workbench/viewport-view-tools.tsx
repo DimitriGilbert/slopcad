@@ -334,7 +334,7 @@ export function CadViewportViewTools({
           {drag !== null ? (
             <svg className="pointer-events-none absolute inset-0 h-full w-full">
               <rect
-                className="fill-signal/10 stroke-signal"
+                className="fill-viewport-select/15 stroke-viewport-select"
                 data-testid="viewport-zoom-window-rect"
                 height={Math.abs(drag.y - drag.startY)}
                 width={Math.abs(drag.x - drag.startX)}
@@ -343,14 +343,25 @@ export function CadViewportViewTools({
               />
             </svg>
           ) : null}
-          <span className="text-muted-foreground absolute top-2 left-1/2 -translate-x-1/2 rounded-sm border border-border bg-background/95 px-2 py-1 text-xs">
+          {/* The gesture's instruction rides the VIEWPORT's own surface
+              tokens, not the chrome's: it sits over the bed, which keeps
+              its own register (a night bed under light chrome in
+              Machinist), so chrome ink on a chrome scrim would be the
+              wrong material here. */}
+          <span className="absolute top-2 left-1/2 -translate-x-1/2 rounded-sm border border-viewport-rule bg-viewport-scrim px-2 py-1 text-ui text-viewport-ink">
             Drag a window to zoom — Esc cancels
           </span>
         </div>
       ) : null}
+      {/* The strip is a floating surface, so it is the system's `overlay`
+          rung — the one rung allowed a shadow, and the shadow is the
+          scheme-tinted `--elevation-overlay`, not an untinted black drop.
+          Its width comes off `--rail-w-icon` rather than a magic 200px, and
+          its pad and gaps off the panel tokens, so the strip measures like
+          the docks it floats over. */}
       <div
         aria-label="View tools"
-        className={`bg-background/95 border-border absolute right-3 bottom-3 flex w-[200px] flex-col gap-1.5 rounded-md border p-1.5 shadow-lg shadow-black/25 ${
+        className={`absolute right-3 bottom-3 flex w-[calc(var(--rail-w-icon)*4)] flex-col gap-(--gap) rounded-md border border-rule-strong bg-overlay p-(--pad-row) shadow-overlay ${
           // While the zoom window is armed its full-viewport layer owns the
           // gesture: the panel stands down (no pointer events, visually
           // receded) so a rectangle drawn over it still commits instead of
@@ -377,7 +388,7 @@ export function CadViewportViewTools({
             >
               {cube.faces.map((face) => (
                 <polygon
-                  className="fill-muted/60 stroke-muted-foreground/70"
+                  className="fill-well stroke-rule-strong"
                   fillOpacity={face.id === cube.faces.at(-1)?.id ? 1 : 0.45}
                   key={face.id}
                   points={face.points
@@ -391,7 +402,7 @@ export function CadViewportViewTools({
               ))}
               {cube.faces.map((face) => (
                 <text
-                  className="fill-foreground"
+                  className="fill-ink"
                   dominantBaseline="central"
                   fontSize="9"
                   key={`${face.id}-label`}
@@ -408,7 +419,7 @@ export function CadViewportViewTools({
             {cube.faces.map((face) => (
               <button
                 aria-label={`${face.id} view`}
-                className="hover:bg-signal/25 absolute rounded-[4px]"
+                className="absolute rounded-[2px] hover:bg-select-wash-strong"
                 data-testid={`view-cube-face-${face.id}`}
                 key={`hit-${face.id}`}
                 onClick={() => {
@@ -427,7 +438,7 @@ export function CadViewportViewTools({
             {cube.corners.at(-1) !== undefined ? (
               <button
                 aria-label="Iso view of the nearest corner"
-                className="hover:bg-signal/40 absolute size-2.5 rounded-full"
+                className="absolute size-2.5 rounded-full hover:bg-select-wash-strong"
                 data-testid="view-cube-corner"
                 onClick={() => {
                   const corner = cube.corners.at(-1);

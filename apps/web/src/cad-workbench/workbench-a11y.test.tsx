@@ -67,7 +67,10 @@ describe("FeatureTimelineChips accessibility", () => {
     render(<ChipsHarness />);
     const toggle = screen.getByLabelText("Suppress extrude");
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(toggle.className).toContain("focus-visible:ring-1");
+    // The one focus treatment in the product: `focus-instrument` (a 2px
+    // outline at a 1px offset, declared once in cockpit.css), not a
+    // per-component ring.
+    expect(toggle.className).toContain("focus-instrument");
     // The pressed state mirrors the suppressed status after activation.
     fireEvent.click(toggle);
     expect(

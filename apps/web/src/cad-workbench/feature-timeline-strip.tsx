@@ -21,10 +21,17 @@ import type {
 } from "@slopcad/cad-react";
 import { Eye, EyeOff } from "lucide-react";
 
-/** Visual presentation of one joined timeline status. The healthy state
- * carries NO dot and quiet ink — failures are the only loud chips (the
- * quiet-when-valid rule); the dot column exists only for states that
- * need a marker. */
+/**
+ * Visual presentation of one joined timeline status, on the system's own
+ * tokens. The healthy state carries NO dot and quiet ink — failures are
+ * the only loud chips (the quiet-when-valid rule); the dot column exists
+ * only for states that need a marker.
+ *
+ * `stale` is the one status that borrows the signal colour, and it borrows
+ * it as a STATUS (the hue `StatusDot` gives a warning), never as the
+ * accent: the chip keeps instrument ink on a wash so a stale feature does
+ * not out-shout the armed tool. Its own text used to be amber too.
+ */
 const TIMELINE_STATUS_PRESENTATION: Readonly<
   Record<
     FeatureTimelineStatus,
@@ -37,23 +44,23 @@ const TIMELINE_STATUS_PRESENTATION: Readonly<
 > = Object.freeze({
   valid: Object.freeze({
     dot: null,
-    text: "text-muted-foreground",
-    chip: "border-border bg-card/70",
+    text: "text-ink-dim",
+    chip: "border-rule bg-panel-raised",
   }),
   stale: Object.freeze({
     dot: "bg-signal",
-    text: "text-signal",
-    chip: "border-signal/40 bg-signal/8",
+    text: "text-ink",
+    chip: "border-signal/40 bg-signal/10",
   }),
   failed: Object.freeze({
     dot: "bg-destructive",
     text: "text-destructive font-medium",
-    chip: "border-destructive/60 bg-destructive/8",
+    chip: "border-destructive/60 bg-destructive/10",
   }),
   suppressed: Object.freeze({
-    dot: "border border-muted-foreground/60 bg-transparent",
-    text: "text-muted-foreground italic",
-    chip: "border-dashed border-border bg-transparent",
+    dot: "border border-ink-faint bg-transparent",
+    text: "text-ink-faint italic",
+    chip: "border-dashed border-rule bg-transparent",
   }),
   "beyond-rollback": Object.freeze({
     dot: "bg-status-parked",
@@ -208,7 +215,7 @@ export function FeatureTimelineSummary({
   ).length;
   return (
     <span
-      className="text-muted-foreground ml-auto min-w-0 truncate pl-3 font-mono text-[11px]"
+      className="ml-auto min-w-0 truncate pl-(--gap-group) font-mono text-data text-ink-faint tabular"
       data-testid="timeline-summary"
     >
       {rollback === null ? "" : "rollback · "}
@@ -252,7 +259,7 @@ function TimelineFragment({
         onClear={onClearRollback}
       />
       <span
-        className={`flex h-6 shrink-0 snap-start items-center gap-1.5 rounded-sm border px-1.5 ${presentation.chip}`}
+        className={`flex h-(--tool-h) shrink-0 snap-start items-center gap-(--gap) rounded-sm border px-(--pad-row) ${presentation.chip}`}
         data-testid="timeline-chip"
         data-timeline-id={entry.id}
         data-timeline-status={entry.status}
@@ -271,11 +278,11 @@ function TimelineFragment({
           />
         ) : null}
         <span
-          className={`font-mono text-[11px] font-medium leading-none ${presentation.text}`}
+          className={`font-mono text-data font-medium leading-none ${presentation.text}`}
         >
           {entry.kind}
         </span>
-        <span className={`text-[10px] leading-none ${presentation.text}`}>
+        <span className={`text-micro leading-none ${presentation.text}`}>
           {TIMELINE_STATUS_LABELS[entry.status]}
         </span>
         <button
@@ -284,7 +291,7 @@ function TimelineFragment({
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
           aria-pressed={suppressed}
-          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-sm outline-none transition-colors hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50"
+          className="focus-instrument ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-sm text-ink-faint transition-colors duration-(--dur-state) hover:bg-well hover:text-ink"
           title={
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
@@ -324,7 +331,7 @@ function TimelineGap({
       type="button"
       aria-label={active ? `Remove rollback point — ${label}` : label}
       aria-pressed={active}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-sm outline-none snap-start focus-visible:ring-1 focus-visible:ring-ring/80"
+      className="focus-instrument relative h-5 w-3 shrink-0 cursor-pointer snap-start rounded-sm transition-colors duration-(--dur-state) hover:bg-well"
       title={active ? `Remove rollback point — ${label}` : label}
       onClick={() => {
         if (active) {
@@ -337,7 +344,7 @@ function TimelineGap({
       {active ? (
         <span
           aria-hidden="true"
-          className="bg-signal absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full"
+          className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-select-edge"
           data-testid="rollback-marker"
         />
       ) : null}

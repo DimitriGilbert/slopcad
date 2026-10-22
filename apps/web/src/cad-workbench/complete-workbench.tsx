@@ -107,6 +107,11 @@ import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel"
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
+import {
+  KeyCap,
+  ToolButton,
+  ToolGroup,
+} from "@slopcad/ui/components/cockpit/tool-button";
 import type { RenderCamera, RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CurveAuthoring } from "./curves";
@@ -1869,18 +1874,34 @@ export function CompleteCadWorkbench({
 
   const defaultToolbar = <CadToolbar className="border-0 bg-transparent p-0" />;
 
+  /*
+   * The getting-started card's ONE visibility truth.
+   *
+   * It used to be `!dismissed` alone, which meant the first-run card
+   * floated over the bottom of the stage for the whole session — over a
+   * finished body, over a selection, over the view strip — teaching a
+   * first step the operator had already taken. A hint that outstays its
+   * question is chrome, not help.
+   *
+   * It now retires the moment the document carries a feature: the card has
+   * been answered. Dismissal (and entering sketch mode) still retire it
+   * the same way, still persist per browser, and every trigger keeps its
+   * testid — `data-sketch-hint` simply publishes this same truth, so the
+   * attribute and the pixels can never disagree.
+   */
+  const sketchHintOpen =
+    !showingPreview && !sketchHintDismissed && (timeline?.length ?? 0) === 0;
+
   const defaultHistoryTimeline = (
     <div
       aria-label="Feature timeline"
-      className="border-border bg-card/40 flex h-9 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-t px-3"
+      className="flex h-9 min-w-0 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-chrome px-(--pad-panel)"
       data-testid="complete-feature-timeline"
       role="group"
     >
-      <span className="text-muted-foreground shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-        Timeline
-      </span>
+      <span className="label-section shrink-0 text-ink-faint">Timeline</span>
       {timeline === null ? (
-        <span className="text-muted-foreground shrink-0 text-xs">
+        <span className="shrink-0 text-ui text-ink-dim">
           {regenerationIssue ?? "\u2026"}
         </span>
       ) : (
@@ -1927,12 +1948,7 @@ export function CompleteCadWorkbench({
             the trigger collapses to its mark, the hint lives in the title. */}
         <Command aria-hidden="true" className="xl:hidden" />
         <span className="max-xl:hidden">{LABELS.commandMenuTrigger}</span>
-        <kbd
-          aria-hidden="true"
-          className="border-current/40 border max-xl:hidden px-1 font-mono text-[10px] font-normal leading-4"
-        >
-          {LABELS.commandMenuHint}
-        </kbd>
+        <KeyCap className="max-xl:hidden">{LABELS.commandMenuHint}</KeyCap>
       </Button>
       <CadCommandMenu
         commands={commands}
@@ -2032,25 +2048,24 @@ export function CompleteCadWorkbench({
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0"
               >
-                <span className="border-muted-foreground absolute top-1.5 left-1.5 size-2.5 border-t border-l" />
-                <span className="border-muted-foreground absolute top-1.5 right-1.5 size-2.5 border-t border-r" />
-                <span className="border-muted-foreground absolute bottom-1.5 left-1.5 size-2.5 border-b border-l" />
-                <span className="border-muted-foreground absolute right-1.5 bottom-1.5 size-2.5 border-r border-b" />
+                <span className="absolute top-1.5 left-1.5 size-2.5 border-t border-l border-viewport-rule-strong" />
+                <span className="absolute top-1.5 right-1.5 size-2.5 border-t border-r border-viewport-rule-strong" />
+                <span className="absolute bottom-1.5 left-1.5 size-2.5 border-b border-l border-viewport-rule-strong" />
+                <span className="absolute right-1.5 bottom-1.5 size-2.5 border-r border-b border-viewport-rule-strong" />
               </div>
               {showingPreview ? (
-                <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 rounded-sm border border-border bg-background/95 px-2 py-1 text-xs shadow-sm">
-                  <span className="text-muted-foreground font-mono text-[11px]">
+                <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-(--gap) rounded-sm border border-viewport-rule bg-viewport-scrim px-2 py-1">
+                  <span className="font-mono text-data text-viewport-ink-dim">
                     {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
                   </span>
-                  <Button
+                  <ToolButton
+                    className="text-viewport-ink-dim hover:bg-viewport-rule hover:text-viewport-ink"
                     data-testid="complete-clear-import"
                     onClick={ioSurface.onClearPreview}
-                    size="xs"
-                    type="button"
-                    variant="outline"
+                    size="sm"
                   >
                     Back to model
-                  </Button>
+                  </ToolButton>
                 </div>
               ) : null}
               {!showingPreview &&
@@ -2126,7 +2141,7 @@ export function CompleteCadWorkbench({
               ) : null}
               {sketchOnFaceNote !== null ? (
                 <div
-                  className="border-destructive/40 bg-background/95 text-destructive absolute top-2 right-2 max-w-sm rounded-sm border px-2 py-1 text-xs leading-4"
+                  className="absolute top-2 right-2 max-w-sm rounded-sm border border-destructive/40 bg-overlay px-2 py-1 text-ui text-destructive shadow-overlay"
                   data-testid="sketch-on-face-note"
                   role="alert"
                 >
@@ -2166,69 +2181,77 @@ export function CompleteCadWorkbench({
                 selection={selectionApi.selected}
                 session={viewSession}
               />
-              {!showingPreview && !sketchHintDismissed ? (
+              {sketchHintOpen ? (
                 <div
                   className="pointer-events-auto absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1rem)] -translate-x-1/2"
                   data-testid="workbench-sketch-hint"
                 >
-                  <div className="border-signal/40 bg-background/95 flex items-start gap-2.5 rounded-md border px-3 py-2 shadow-lg shadow-black/25">
+                  {/* The card is a floating surface, so it is the `overlay`
+                      rung with the scheme-tinted overlay shadow — not an
+                      amber-edged translucent plate with a black drop. It
+                      used to be bordered, washed, icon-tinted AND
+                      word-tinted in the signal colour: four accents on one
+                      transient card, while the armed tool had to make do
+                      with the same hue. The one signal mark it keeps is the
+                      verb it is teaching. */}
+                  <div className="flex items-start gap-(--gap-group) rounded-md border border-rule-strong bg-overlay px-3 py-2 shadow-overlay">
                     <span
                       aria-hidden="true"
-                      className="border-signal/40 bg-signal/15 text-signal mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border"
+                      className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border border-rule bg-well text-ink-dim"
                     >
                       <PencilLine className="size-3.5" />
                     </span>
-                    <div className="min-w-0">
-                      <p className="text-foreground text-xs leading-snug">
+                    {/* The prose column is BOUNDED: left to `w-max` the
+                        card grew to the stage's full width and pushed its
+                        own verbs under the view strip at 1280. A teaching
+                        card is a paragraph, not a banner. */}
+                    <div className="min-w-0 max-w-[22rem]">
+                      <p className="text-ui text-ink">
                         Start a sketch to build geometry — draw a profile, then{" "}
-                        <span className="text-signal font-medium">Extrude</span>
+                        <span className="font-medium text-signal">Extrude</span>
                         .
                       </p>
-                      <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">
+                      <p className="mt-0.5 text-label text-ink-dim">
                         The guide plate is your starter document. Or press{" "}
-                        <kbd className="border-current/40 border px-1 font-mono text-[10px]">
-                          Ctrl+K
-                        </kbd>{" "}
-                        and run “Sketch workspace” — or skip the sketch with a
-                        primitive (“Add a box”, sphere, cylinder, cone).
+                        <KeyCap>Ctrl+K</KeyCap> and run “Sketch workspace” — or
+                        skip the sketch with a primitive (“Add a box”, sphere,
+                        cylinder, cone).
                       </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        className="border-signal/50 hover:bg-signal/10"
+                    <ToolGroup
+                      className="shrink-0"
+                      label="Getting started"
+                      separated={false}
+                    >
+                      <ToolButton
                         data-testid="workbench-sketch-hint-start"
                         onClick={() => {
                           setMode("sketch");
                         }}
-                        size="xs"
-                        type="button"
-                        variant="outline"
+                        size="sm"
                       >
                         Start a sketch
-                      </Button>
-                      <Button
+                      </ToolButton>
+                      <ToolButton
                         data-testid="workbench-sketch-hint-primitive"
                         onClick={() => {
                           openFeatureDialog("box");
                         }}
-                        size="xs"
-                        type="button"
-                        variant="ghost"
+                        size="sm"
                       >
                         Add a box
-                      </Button>
-                      <Button
+                      </ToolButton>
+                      <ToolButton
                         aria-label="Dismiss the getting-started hint"
+                        className="w-(--control-h) justify-center px-0"
                         data-testid="workbench-sketch-hint-dismiss"
                         onClick={dismissSketchHint}
-                        size="icon-xs"
+                        size="sm"
                         title="Dismiss"
-                        type="button"
-                        variant="ghost"
                       >
-                        <X className="size-3.5" />
-                      </Button>
-                    </div>
+                        <X />
+                      </ToolButton>
+                    </ToolGroup>
                   </div>
                 </div>
               ) : null}
@@ -2244,7 +2267,7 @@ export function CompleteCadWorkbench({
           digits over near-black glass (the cockpit's glance-mark); light
           stays plain ink on paper. */}
       <div
-        className="border-border bg-card/50 text-muted-foreground dark:border-signal/20 dark:bg-black/60 flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px] whitespace-nowrap"
+        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-well px-(--pad-panel) font-mono text-data whitespace-nowrap text-ink-dim"
         data-testid="viewport-dro"
       >
         <span
@@ -2307,7 +2330,7 @@ export function CompleteCadWorkbench({
         )}
         {/* The live tool state rides the DRO's right end: what is armed,
             and how it cancels. */}
-        <span className="text-muted-foreground ml-auto hidden items-center gap-4 sm:flex">
+        <span className="ml-auto hidden items-center gap-(--gap-group) sm:flex">
           {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
             <span>
               tool{" "}
@@ -2433,7 +2456,7 @@ export function CompleteCadWorkbench({
         engine.importParameterTableCsv(text);
       }}
       onImportError={setCsvImportReadError}
-      className="w-full shrink-0 border-t border-border"
+      className="w-full shrink-0 border-t border-rule"
     />
   );
 
@@ -2553,7 +2576,7 @@ export function CompleteCadWorkbench({
         .map(selectionReferenceKey)
         .join(";")}
       data-selection-regeneration={String(selectionApi.regeneration)}
-      data-sketch-hint={sketchHintDismissed ? "dismissed" : "open"}
+      data-sketch-hint={sketchHintOpen ? "open" : "dismissed"}
       data-sketch-mode={mode}
       data-tool-completion={
         toolsApi.completion === null ? "" : completionJson(toolsApi.completion)
@@ -2577,9 +2600,7 @@ export function CompleteCadWorkbench({
           here, keeping its DOM unchanged. Same wrapper band the shared
           WorkbenchLayout wraps its bar in. */}
       {barNode === undefined ? null : (
-        <div className="border-border bg-background shrink-0 border-b">
-          {barNode}
-        </div>
+        <div className="shrink-0 border-b border-rule bg-chrome">{barNode}</div>
       )}
       {/* The command row, grouped like a machine headstock: the document
           plate (what this document IS, live), the tool group, then the
@@ -2594,7 +2615,7 @@ export function CompleteCadWorkbench({
           MOUNTED but hidden so the session's surface writer keeps their
           ids. */}
       <div
-        className={`border-border bg-card/40 h-10 shrink-0 items-center gap-1 border-b pr-2 ${
+        className={`h-(--appbar-h) shrink-0 items-center gap-(--gap-tight) border-b border-rule bg-chrome pr-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
@@ -2635,21 +2656,21 @@ export function CompleteCadWorkbench({
               on the stage — so it is instrument ink, not the signal. In
               amber it was a permanent accent in the app bar competing with
               the armed tool two groups to its right. */}
-          <span className="text-ink font-mono text-[11px] tabular">
+          <span className="font-mono text-data text-ink tabular">
             {showingPreview ? "import" : engine.activeScene}
           </span>
-          <span className="text-muted-foreground hidden font-mono text-[11px] 2xl:inline">
+          <span className="hidden font-mono text-data text-ink-dim tabular 2xl:inline">
             {applied === null
               ? "computing…"
               : formatBoundsExtents(applied.state.measurement.bounds)}
           </span>
-          <span className="text-muted-foreground hidden font-mono text-[11px] xl:inline">
+          <span className="hidden font-mono text-data text-ink-dim tabular xl:inline">
             {timeline === null ? "" : `${String(timeline.length)} features`}
           </span>
         </div>
-        <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
+        <div aria-hidden="true" className="h-5 w-px shrink-0 bg-rule" />
         {toolbar}
-        <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
+        <div aria-hidden="true" className="h-5 w-px shrink-0 bg-rule" />
         <div
           aria-label="History"
           className="flex shrink-0 items-center gap-0.5"
@@ -3161,7 +3182,7 @@ export function CompleteCadWorkbench({
             tab order off-screen (visibility flips at the transition's
             end on close, start on open — the slide survives). */}
         <div
-          className={`border-border bg-card absolute inset-y-0 left-0 z-30 flex w-60 shrink-0 flex-col border-r shadow-2xl transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:bg-card/40 xl:shadow-none ${
+          className={`absolute inset-y-0 left-0 z-30 flex w-(--rail-w) shrink-0 flex-col border-r border-rule bg-panel shadow-overlay transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:shadow-none ${
             treeDrawerOpen
               ? "visible translate-x-0"
               : "invisible -translate-x-full xl:visible xl:translate-x-0"
@@ -3336,7 +3357,7 @@ export function CompleteCadWorkbench({
                                                               : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
-            <p className="text-muted-foreground text-xs leading-snug">
+            <p className="text-body text-ink-dim">
               {featureDialog === "surface-create"
                 ? "Bind an untrimmed plane patch to a datum plane: the base sheet the surface operations reshape."
                 : featureDialog === "surface-trim"
