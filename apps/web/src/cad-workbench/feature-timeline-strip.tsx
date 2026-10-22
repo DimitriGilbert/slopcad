@@ -44,12 +44,12 @@ const TIMELINE_STATUS_PRESENTATION: Readonly<
 > = Object.freeze({
   valid: Object.freeze({
     dot: null,
-    text: "text-ink-dim",
+    text: "ink-dim",
     chip: "border-rule bg-panel-raised",
   }),
   stale: Object.freeze({
     dot: "bg-signal",
-    text: "text-ink",
+    text: "ink",
     chip: "border-signal/40 bg-signal/10",
   }),
   failed: Object.freeze({
@@ -59,7 +59,7 @@ const TIMELINE_STATUS_PRESENTATION: Readonly<
   }),
   suppressed: Object.freeze({
     dot: "border border-ink-faint bg-transparent",
-    text: "text-ink-faint italic",
+    text: "ink-faint italic",
     chip: "border-dashed border-rule bg-transparent",
   }),
   "beyond-rollback": Object.freeze({
@@ -215,7 +215,7 @@ export function FeatureTimelineSummary({
   ).length;
   return (
     <span
-      className="ml-auto min-w-0 truncate pl-(--gap-group) font-mono text-data text-ink-faint tabular"
+      className="ml-auto min-w-0 truncate pl-(--gap-group) font-mono text-data ink-faint tabular"
       data-testid="timeline-summary"
     >
       {rollback === null ? "" : "rollback · "}
@@ -291,7 +291,7 @@ function TimelineFragment({
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
           aria-pressed={suppressed}
-          className="focus-instrument ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-sm text-ink-faint transition-colors duration-(--dur-state) hover:bg-well hover:text-ink"
+          className="focus-instrument ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-sm ink-faint transition-colors duration-(--dur-state) hover:bg-well hover:ink"
           title={
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }

@@ -213,7 +213,7 @@ export function WorkbenchModelRail({
               trailing={String(sketches.length)}
             >
               {sketches.length === 0 ? (
-                <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
+                <p className="px-(--pad-row) py-(--gap) text-ui ink-dim">
                   no saved sketches yet
                 </p>
               ) : (
@@ -235,7 +235,7 @@ export function WorkbenchModelRail({
               trailing={String(datums.length)}
             >
               {datums.length === 0 ? (
-                <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
+                <p className="px-(--pad-row) py-(--gap) text-ui ink-dim">
                   no datum geometry yet
                 </p>
               ) : (

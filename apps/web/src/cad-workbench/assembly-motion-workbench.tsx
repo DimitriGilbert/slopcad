@@ -520,7 +520,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 52 Assemblies fixture — patterns, mirror, explode, motion
         </h1>
-        <p className="text-ink-dim text-sm">
+        <p className="ink-dim text-sm">
           Component patterns and mirror placements stamp ordinary occurrences;
           the explode state and the revolute joint compose on top of the
           resolved instances; the strip below is the cross-document staleness
@@ -588,7 +588,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
       </div>
       <div className="flex flex-wrap items-center gap-6">
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-ink-dim">Explode</span>
+          <span className="ink-dim">Explode</span>
           <input
             aria-label="Explode factor"
             className="w-48"
@@ -605,7 +605,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
           <span className="font-mono text-xs">{explodeFactor.toFixed(2)}</span>
         </label>
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-ink-dim">Joint (deg)</span>
+          <span className="ink-dim">Joint (deg)</span>
           <input
             aria-label="Joint parameter"
             className="w-48"
@@ -623,7 +623,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
             {motionParameter.toFixed(0)}°
           </span>
         </label>
-        <span className="text-ink-dim text-xs">
+        <span className="ink-dim text-xs">
           clearance floor{" "}
           <span className="font-mono" data-testid="motion-clearance">
             {clearanceText} mm
@@ -631,7 +631,7 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
         </span>
       </div>
       <div className="border-rule flex flex-wrap items-center gap-2 rounded-md border p-3">
-        <span className="text-ink-dim text-xs font-medium tracking-wider uppercase">
+        <span className="ink-dim text-xs font-medium tracking-wider uppercase">
           Cross-document
         </span>
         <span className="font-mono text-xs">

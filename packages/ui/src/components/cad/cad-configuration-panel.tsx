@@ -149,8 +149,8 @@ const CREATE_DEFAULT_VALUES: CreateValues = { name: "" };
  * strip's control height. The label and the submit path are untouched.
  */
 const CREATE_SUBMIT_CLASS =
-  "h-(--tool-h) border-rule bg-panel text-ink-dim shadow-none " +
-  "hover:bg-well hover:text-ink active:shadow-none";
+  "h-(--tool-h) border-rule bg-panel ink-dim shadow-none " +
+  "hover:bg-well hover:ink active:shadow-none";
 
 /**
  * The CAD configuration panel: switcher, table, create form, and CSV row.
@@ -238,7 +238,7 @@ export function CadConfigurationPanel({
              */
             <label
               key={id ?? "base"}
-              className="flex min-h-(--row-h) cursor-pointer items-center gap-(--gap) border-l-2 border-l-transparent px-(--pad-row) text-ui text-ink transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well data-[active=true]:border-l-select-edge data-[active=true]:bg-select-wash data-[active=true]:text-select-ink"
+              className="flex min-h-(--row-h) cursor-pointer items-center gap-(--gap) border-l-2 border-l-transparent px-(--pad-row) text-ui ink transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well data-[active=true]:border-l-select-edge data-[active=true]:bg-select-wash data-[active=true]:text-select-ink"
               data-active={active}
             >
               <input
@@ -260,7 +260,7 @@ export function CadConfigurationPanel({
 
       <div className="flex min-w-0 flex-col gap-(--gap-group) p-(--pad-panel)">
         {configurations.length === 0 ? (
-          <p className="text-ui text-ink-dim">{labels.empty}</p>
+          <p className="text-ui ink-dim">{labels.empty}</p>
         ) : (
           /* The counts table keeps the row rhythm: `--row-h` cells, the
              label voice in the head, tabular mono figures, and a hairline
@@ -268,23 +268,23 @@ export function CadConfigurationPanel({
           <table className="w-full border-collapse text-ui">
             <thead>
               <tr className="text-left">
-                <th className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim">
+                <th className="h-(--row-h) pr-(--gap) text-label font-normal ink-dim">
                   {labels.title}
                 </th>
                 <th
-                  className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim"
+                  className="h-(--row-h) pr-(--gap) text-label font-normal ink-dim"
                   title={labels.overridesHeading}
                 >
                   {labels.overridesHeading}
                 </th>
                 <th
-                  className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim"
+                  className="h-(--row-h) pr-(--gap) text-label font-normal ink-dim"
                   title={labels.suppressedHeading}
                 >
                   {labels.suppressedHeading}
                 </th>
                 <th
-                  className="h-(--row-h) pr-(--gap) text-label font-normal text-ink-dim"
+                  className="h-(--row-h) pr-(--gap) text-label font-normal ink-dim"
                   title={labels.hiddenHeading}
                 >
                   {labels.hiddenHeading}
@@ -356,7 +356,7 @@ export function CadConfigurationPanel({
              * itself, and the label wears the product's control treatment.
              */
             <label
-              className="inline-flex size-(--tool-h) cursor-pointer items-center justify-center rounded-sm border border-transparent text-ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)"
+              className="inline-flex size-(--tool-h) cursor-pointer items-center justify-center rounded-sm border border-transparent ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)"
               title={labels.importCsv}
             >
               <Upload aria-hidden="true" className="size-3.5 shrink-0" />

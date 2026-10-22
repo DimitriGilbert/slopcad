@@ -39,15 +39,12 @@ function PropertyRow({
         "px-(--pad-row) text-ui last:border-b-0",
         selected
           ? "border-l-select-edge bg-select-wash text-select-ink"
-          : "text-ink",
+          : "ink",
         className,
       )}
       {...props}
     >
-      <span
-        data-slot="property-label"
-        className="truncate text-label text-ink-dim"
-      >
+      <span data-slot="property-label" className="truncate text-label ink-dim">
         {label}
       </span>
       <span
@@ -56,7 +53,7 @@ function PropertyRow({
       >
         {children}
         {unit === undefined ? null : (
-          <span className="text-micro text-ink-faint">{unit}</span>
+          <span className="text-micro ink-faint">{unit}</span>
         )}
       </span>
     </div>
@@ -90,10 +87,10 @@ function Readout({
       )}
       {...props}
     >
-      <span className="label-section text-ink-faint">{label}</span>
-      <span className="font-mono text-data text-ink tabular">{children}</span>
+      <span className="label-section ink-faint">{label}</span>
+      <span className="font-mono text-data ink tabular">{children}</span>
       {unit === undefined ? null : (
-        <span className="font-mono text-micro text-ink-faint">{unit}</span>
+        <span className="font-mono text-micro ink-faint">{unit}</span>
       )}
     </div>
   );

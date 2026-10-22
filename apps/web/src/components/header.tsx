@@ -87,7 +87,7 @@ export default function Header() {
           to="/"
         >
           <PlateMark />
-          <span className="font-display text-title font-semibold text-ink">
+          <span className="font-display text-title font-semibold ink">
             slopcad
           </span>
         </Link>
@@ -99,10 +99,10 @@ export default function Header() {
             <Link
               key={to}
               activeOptions={{ exact: to === "/" }}
-              className="flex h-(--tool-h) items-center rounded-sm border-b-2 border-b-transparent px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink focus-instrument"
+              className="flex h-(--tool-h) items-center rounded-sm border-b-2 border-b-transparent px-2 text-ui font-medium ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:ink focus-instrument"
               activeProps={{
                 className:
-                  "flex h-(--tool-h) items-center rounded-sm border-b-2 border-b-select-edge px-2 text-ui font-medium text-ink focus-instrument",
+                  "flex h-(--tool-h) items-center rounded-sm border-b-2 border-b-select-edge px-2 text-ui font-medium ink focus-instrument",
               }}
               to={to}
             >

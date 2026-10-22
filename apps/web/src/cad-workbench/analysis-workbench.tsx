@@ -508,7 +508,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 58 analysis fixture — draft, curvature, zebra, COG/mass
         </h1>
-        <p className="text-ink-dim text-sm">
+        <p className="ink-dim text-sm">
           A draft box, an open tube, a curvature comb arc, and a two-material
           mass compound with its COG marker.
         </p>
@@ -550,7 +550,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
                     style={{ background: face.colorHex }}
                   />
                   <span className="w-16">{face.classification}</span>
-                  <span className="text-ink-dim">
+                  <span className="ink-dim">
                     {stampNumber(face.angleDeg)}° from pull · {face.cornerCount}{" "}
                     corners
                   </span>
@@ -558,7 +558,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
               ))}
             </ul>
           ) : (
-            <p className="text-ink-dim mt-2 text-sm">
+            <p className="ink-dim mt-2 text-sm">
               {ran
                 ? "The draft analysis declined the soup."
                 : "No draft report yet — run the analysis."}
@@ -581,13 +581,13 @@ export function AnalysisWorkbenchPage(): ReactElement {
                       style={{ background: entry.colorHex }}
                     />
                     <span className="w-14">{entry.band}</span>
-                    <span className="text-ink-dim">
+                    <span className="ink-dim">
                       {entry.vertices} welded vertices
                     </span>
                   </li>
                 ))}
               </ul>
-              <p className="text-ink-dim">
+              <p className="ink-dim">
                 Comb over the r=30 arc: max |κ| ={" "}
                 {COMB_RESULT.ok
                   ? stampNumber(COMB_RESULT.value.maxCurvature)
@@ -597,7 +597,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
               </p>
             </div>
           ) : (
-            <p className="text-ink-dim mt-2 text-sm">
+            <p className="ink-dim mt-2 text-sm">
               {ran
                 ? "The curvature analysis declined the inputs."
                 : "No curvature report yet — run the analysis."}
@@ -625,7 +625,7 @@ export function AnalysisWorkbenchPage(): ReactElement {
               </p>
             </div>
           ) : (
-            <p className="text-ink-dim mt-2 text-sm">
+            <p className="ink-dim mt-2 text-sm">
               The mass aggregate declined — {mass.error.code}
             </p>
           )}

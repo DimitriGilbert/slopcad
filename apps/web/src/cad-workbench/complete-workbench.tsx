@@ -2061,7 +2061,7 @@ export function CompleteCadWorkbench({
       <div className="flex items-start gap-(--gap-group) rounded-md border border-rule-strong bg-overlay px-3 py-2 shadow-overlay">
         <span
           aria-hidden="true"
-          className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border border-rule bg-well text-ink-dim"
+          className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border border-rule bg-well ink-dim"
         >
           <PencilLine className="size-3.5" />
         </span>
@@ -2069,11 +2069,11 @@ export function CompleteCadWorkbench({
             the stage's full width and pushed its own verbs under the view
             strip at 1280. A teaching card is a paragraph, not a banner. */}
         <div className="min-w-0 max-w-[22rem]">
-          <p className="text-ui text-ink">
+          <p className="text-ui ink">
             Start a sketch to build geometry — draw a profile, then{" "}
-            <span className="font-medium text-ink">Extrude</span>.
+            <span className="font-medium ink">Extrude</span>.
           </p>
-          <p className="mt-0.5 text-label text-ink-dim">
+          <p className="mt-0.5 text-label ink-dim">
             The guide plate is your starter document. Or press{" "}
             <KeyCap>Ctrl+K</KeyCap> and run “Sketch workspace” — or skip the
             sketch with a primitive (“Add a box”, sphere, cylinder, cone).
@@ -2664,7 +2664,7 @@ export function CompleteCadWorkbench({
                                                               : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
-            <p className="text-body text-ink-dim">
+            <p className="text-body ink-dim">
               {featureDialog === "surface-create"
                 ? "Bind an untrimmed plane patch to a datum plane: the base sheet the surface operations reshape."
                 : featureDialog === "surface-trim"

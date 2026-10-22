@@ -284,7 +284,7 @@ export function CadCommandMenu({
         <CommandList data-cad-command-list="">
           {resultCount === 0 ? (
             <div
-              className="py-6 text-center text-body text-ink-dim"
+              className="py-6 text-center text-body ink-dim"
               data-cad-command-empty=""
             >
               {labels.empty}

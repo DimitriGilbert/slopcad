@@ -36,7 +36,7 @@ function RouteComponent() {
           to="/"
         >
           <PlateMark className="size-4 rounded-[4px]" />
-          <span className="font-display text-title font-semibold text-ink">
+          <span className="font-display text-title font-semibold ink">
             slopcad
           </span>
         </Link>

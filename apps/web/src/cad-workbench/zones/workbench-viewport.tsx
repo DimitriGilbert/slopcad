@@ -84,7 +84,7 @@ export interface WorkbenchViewportProps {
  * the triangle count AND the tool name at once, which is how a cockpit
  * stops being readable: when everything glows, nothing reads.
  */
-const DRO_VALUE = "text-ink tabular";
+const DRO_VALUE = "ink tabular";
 
 /** CENTER: the canvas frame, the HUD's layer, and the DRO band. */
 export function WorkbenchViewport({
@@ -119,7 +119,7 @@ export function WorkbenchViewport({
           digits over near-black glass (the cockpit's glance-mark); light
           stays plain ink on paper. */}
       <div
-        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-well px-(--pad-panel) font-mono text-data whitespace-nowrap text-ink-dim"
+        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-well px-(--pad-panel) font-mono text-data whitespace-nowrap ink-dim"
         data-testid="viewport-dro"
       >
         <span
@@ -132,7 +132,7 @@ export function WorkbenchViewport({
         <div className="flex min-w-0 items-center gap-(--gap-group) overflow-hidden">
           {dro.showingPreview ? (
             <>
-              <span className="text-ink tabular">
+              <span className="ink tabular">
                 import · {dro.preview?.source ?? ""}
               </span>
               <span>
@@ -147,10 +147,10 @@ export function WorkbenchViewport({
               <span>geometry only, not in the document</span>
             </>
           ) : dro.document === null ? (
-            <span className="text-ink tabular">computing…</span>
+            <span className="ink tabular">computing…</span>
           ) : (
             <>
-              <span className="text-ink tabular">{dro.document.sceneKind}</span>
+              <span className="ink tabular">{dro.document.sceneKind}</span>
               <span>
                 extents{" "}
                 <span className={DRO_VALUE}>{dro.document.extentsText}</span>
@@ -176,8 +176,8 @@ export function WorkbenchViewport({
         <span className="ml-auto flex shrink-0 items-center gap-(--gap-group)">
           {dro.armedToolId === null ? null : (
             <span>
-              tool <span className="text-ink tabular">{dro.armedToolId}</span> ·
-              Esc cancels
+              tool <span className="ink tabular">{dro.armedToolId}</span> · Esc
+              cancels
             </span>
           )}
           <span>

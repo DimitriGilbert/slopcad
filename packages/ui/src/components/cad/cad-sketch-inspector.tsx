@@ -287,7 +287,7 @@ export interface CadSketchInspectorProps {
  */
 const STATUS_CLASSES: Readonly<Record<CadSketchConstraintStatus, string>> =
   Object.freeze({
-    ok: "text-ink-dim",
+    ok: "ink-dim",
     warning: "text-signal",
     error: "text-destructive",
   });
@@ -295,7 +295,7 @@ const STATUS_CLASSES: Readonly<Record<CadSketchConstraintStatus, string>> =
 const SEVERITY_CLASSES: Readonly<
   Record<CadSketchInspectorDiagnostic["severity"], string>
 > = Object.freeze({
-  info: "text-ink-dim",
+  info: "ink-dim",
   warning: "text-signal",
   error: "text-destructive",
 });
@@ -715,7 +715,7 @@ export function CadSketchInspector({
             >
               {labels.statusLabels[solveStatus]}
             </span>
-            <span className="whitespace-nowrap text-ink-faint tabular">
+            <span className="whitespace-nowrap ink-faint tabular">
               {labels.dofLabel} {String(dof)}
             </span>
           </span>
@@ -729,7 +729,7 @@ export function CadSketchInspector({
           trailing={String(constraints.length)}
         >
           {constraints.length === 0 ? (
-            <p className="px-(--pad-panel) py-(--pad-row) text-ui text-ink-faint">
+            <p className="px-(--pad-panel) py-(--pad-row) text-ui ink-faint">
               {labels.emptyConstraints}
             </p>
           ) : (
@@ -747,11 +747,11 @@ export function CadSketchInspector({
                       className={cn(
                         "relative flex h-(--row-h) w-full cursor-pointer items-center",
                         "gap-(--gap) border-l-2 border-transparent px-(--pad-row)",
-                        "text-left text-ui text-ink-dim focus-instrument",
+                        "text-left text-ui ink-dim focus-instrument",
                         "transition-colors duration-(--dur-state)",
                         "ease-(--ease-instrument) hover:bg-well",
                         "data-selected:border-l-select-edge",
-                        "data-selected:bg-select-wash data-selected:text-ink",
+                        "data-selected:bg-select-wash data-selected:ink",
                       )}
                       data-selected={selected ? "" : undefined}
                       data-sketch-constraint-id={constraint.id}
@@ -787,9 +787,7 @@ export function CadSketchInspector({
         >
           <div className="p-(--pad-panel)">
             {dimension === null ? (
-              <p className="text-label text-ink-faint">
-                {labels.dimensionHint}
-              </p>
+              <p className="text-label ink-faint">{labels.dimensionHint}</p>
             ) : (
               <>
                 {/* The dimension editor is mounted PER constraint (the
@@ -829,13 +827,13 @@ export function CadSketchInspector({
           >
             <div className="p-(--pad-panel)">
               {array.selectionCount === 0 ? (
-                <p className="text-label text-ink-faint">
+                <p className="text-label ink-faint">
                   {labels.arrayNoSelection}
                 </p>
               ) : (
                 <>
                   <p
-                    className="pb-(--gap-tight) font-mono text-data text-ink-dim"
+                    className="pb-(--gap-tight) font-mono text-data ink-dim"
                     data-testid="sketch-array-selection"
                   >
                     {labels.arraySelectionLabel(array.selectionCount)}
@@ -868,17 +866,17 @@ export function CadSketchInspector({
           title={labels.convertHeading}
         >
           {convert === null ? (
-            <p className="p-(--pad-panel) text-label text-ink-faint">
+            <p className="p-(--pad-panel) text-label ink-faint">
               {labels.convertNoTopology}
             </p>
           ) : convert.entries.length === 0 ? (
-            <p className="p-(--pad-panel) text-label text-ink-faint">
+            <p className="p-(--pad-panel) text-label ink-faint">
               {labels.convertEmpty}
             </p>
           ) : (
             <>
               {convert.hint === undefined ? null : (
-                <p className="px-(--pad-panel) pt-(--pad-row) text-label text-ink-faint">
+                <p className="px-(--pad-panel) pt-(--pad-row) text-label ink-faint">
                   {convert.hint}
                 </p>
               )}
@@ -890,10 +888,10 @@ export function CadSketchInspector({
                       className={cn(
                         "flex h-(--row-h) w-full cursor-pointer items-center",
                         "gap-(--gap) px-(--pad-row) text-left text-ui",
-                        "text-ink-dim transition-colors focus-instrument",
+                        "ink-dim transition-colors focus-instrument",
                         "duration-(--dur-state) ease-(--ease-instrument)",
-                        "enabled:hover:bg-well enabled:hover:text-ink",
-                        "disabled:cursor-default disabled:text-ink-faint",
+                        "enabled:hover:bg-well enabled:hover:ink",
+                        "disabled:cursor-default disabled:ink-faint",
                       )}
                       data-sketch-convert-entry={entry.referenceId}
                       data-sketch-convert-kind={entry.kind}
@@ -940,7 +938,7 @@ export function CadSketchInspector({
           trailing={String(diagnostics.length)}
         >
           {diagnostics.length === 0 ? (
-            <p className="p-(--pad-panel) text-label text-ink-faint">
+            <p className="p-(--pad-panel) text-label ink-faint">
               {labels.emptyDiagnostics}
             </p>
           ) : (

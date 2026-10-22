@@ -66,7 +66,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-(--gap-group) overflow-y-auto rounded-md border border-rule-strong bg-overlay p-(--pad-panel) text-ui text-ink shadow-overlay duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-(--gap-group) overflow-y-auto rounded-md border border-rule-strong bg-overlay p-(--pad-panel) text-ui ink shadow-overlay duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className,
         )}
         {...props}
@@ -135,7 +135,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
       data-slot="dialog-title"
       // A dialog name is a surface title: the display voice at
       // `text-title`, the one size the system gives a panel or dialog name.
-      className={cn("text-title font-medium text-ink", className)}
+      className={cn("text-title font-medium ink", className)}
       {...props}
     />
   );
@@ -149,7 +149,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-body text-ink-dim *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-ink",
+        "text-body ink-dim *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:ink",
         className,
       )}
       {...props}

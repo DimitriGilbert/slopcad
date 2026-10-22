@@ -66,8 +66,8 @@ function RouteComponent(): ReactElement {
           <PanelHeader title="Workspace" titleAs="h2" trailing="empty" />
           <div className="flex flex-col items-start gap-(--gap-group) p-(--gap-group)">
             <div>
-              <p className="text-title text-ink">No projects yet</p>
-              <p className="mt-1 max-w-[72ch] text-body text-ink-dim">
+              <p className="text-title ink">No projects yet</p>
+              <p className="mt-1 max-w-[72ch] text-body ink-dim">
                 Projects group documents, and each document keeps a model with
                 its saved versions. Create the first one to start modeling.
               </p>
@@ -97,7 +97,7 @@ function RouteComponent(): ReactElement {
               titleAs="h2"
               trailing={
                 <Link
-                  className="text-micro text-ink-dim transition-colors duration-(--dur-state) hover:text-ink focus-instrument"
+                  className="text-micro ink-dim transition-colors duration-(--dur-state) hover:ink focus-instrument"
                   to="/projects"
                 >
                   all projects

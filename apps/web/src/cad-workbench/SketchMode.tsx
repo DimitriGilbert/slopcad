@@ -1644,7 +1644,7 @@ export function SketchMode({
         {importSketchFiles ? (
           <ToolGroup label="Exchange">
             <label
-              className="relative inline-flex size-(--tool-h) shrink-0 cursor-pointer items-center justify-center rounded-sm border border-transparent text-ink-dim transition-[background-color,color] duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-(--focus)"
+              className="relative inline-flex size-(--tool-h) shrink-0 cursor-pointer items-center justify-center rounded-sm border border-transparent ink-dim transition-[background-color,color] duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:ink focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-(--focus)"
               title={`${importIcon.label} into the active sketch (one undoable transaction).`}
             >
               <ImportIcon aria-hidden="true" className="size-3.5" />
@@ -1773,7 +1773,7 @@ export function SketchMode({
           and `bg-card/50`; on the status band's own rung and the type
           scale's data size, like every other readout in the cockpit. */}
       <div
-        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-chrome px-(--pad-panel) font-mono text-data whitespace-nowrap text-ink-dim"
+        className="flex h-7 shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-chrome px-(--pad-panel) font-mono text-data whitespace-nowrap ink-dim"
         data-testid="sketch-status"
         data-zone="bottom"
       >
@@ -1812,24 +1812,22 @@ export function SketchMode({
         <span className="ml-auto flex shrink-0 items-center gap-(--gap-group)">
           <span>
             entities{" "}
-            <span className="text-ink tabular">
+            <span className="ink tabular">
               {String(authoredSurface.entities.length)}
             </span>
           </span>
           <span>
             constraints{" "}
-            <span className="text-ink tabular">
+            <span className="ink tabular">
               {String(authoredSurface.constraints.length)}
             </span>
           </span>
           <span>
             commands{" "}
-            <span className="text-ink tabular">
-              {String(commandLog.length)}
-            </span>
+            <span className="ink tabular">{String(commandLog.length)}</span>
           </span>
           <span data-testid="sketch-status-solve">
-            solve <span className="text-ink tabular">{solveState.status}</span>
+            solve <span className="ink tabular">{solveState.status}</span>
             {solveState.dof === null ? "" : ` (dof ${String(solveState.dof)})`}
           </span>
         </span>

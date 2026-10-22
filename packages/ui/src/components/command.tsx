@@ -127,7 +127,7 @@ function CommandGroup({
         // browser's 16px. The real utility cannot be stripped (it is not
         // a `text-*` class) and carries the size, the tracking, the caps
         // and the weight in one token.
-        "text-ink overflow-hidden **:[[cmdk-group-heading]]:flex **:[[cmdk-group-heading]]:h-(--header-h) **:[[cmdk-group-heading]]:items-center **:[[cmdk-group-heading]]:px-(--pad-row) **:[[cmdk-group-heading]]:label-section **:[[cmdk-group-heading]]:text-ink-faint",
+        "ink overflow-hidden **:[[cmdk-group-heading]]:flex **:[[cmdk-group-heading]]:h-(--header-h) **:[[cmdk-group-heading]]:items-center **:[[cmdk-group-heading]]:px-(--pad-row) **:[[cmdk-group-heading]]:label-section **:[[cmdk-group-heading]]:ink-faint",
         className,
       )}
       {...props}

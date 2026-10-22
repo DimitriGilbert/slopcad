@@ -194,8 +194,8 @@ export function CadTopologyPickPanel({
       data-testid="workbench-topology-pick-panel"
       data-topology-pick-verb={verb}
     >
-      <h2 className="text-title text-ink">{title}</h2>
-      <p className="text-label text-ink-dim">{hint}</p>
+      <h2 className="text-title ink">{title}</h2>
+      <p className="text-label ink-dim">{hint}</p>
       {queryError !== null ? (
         <p
           className="text-label text-destructive"
@@ -206,7 +206,7 @@ export function CadTopologyPickPanel({
         </p>
       ) : targets === null ? (
         <p
-          className="text-label text-ink-dim"
+          className="text-label ink-dim"
           data-testid="workbench-topology-pick-loading"
           role="status"
         >
@@ -224,21 +224,17 @@ export function CadTopologyPickPanel({
         </p>
       ) : (
         <>
-          <p className="text-ui text-ink-dim">
-            {labels.topologyPickInstruction}
-          </p>
+          <p className="text-ui ink-dim">{labels.topologyPickInstruction}</p>
           <div data-testid="workbench-topology-picks" role="status">
-            <p className="text-ui font-medium text-ink">
+            <p className="text-ui font-medium ink">
               {selection === null
                 ? section
                 : `${section} — ${labels.topologyPickTarget}: ${selection.target.name}`}
             </p>
             {pickedLabels.length === 0 ? (
-              <p className="text-label text-ink-dim">
-                {labels.topologyPickNone}
-              </p>
+              <p className="text-label ink-dim">{labels.topologyPickNone}</p>
             ) : (
-              <ul className="font-mono text-data text-ink-dim">
+              <ul className="font-mono text-data ink-dim">
                 {pickedLabels.map((option) => (
                   <li key={option.ordinal}>{option.label}</li>
                 ))}

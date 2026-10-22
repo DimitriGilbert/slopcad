@@ -145,7 +145,7 @@ function StatusField({
 }): ReactElement {
   return (
     <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="label-section text-ink-faint">{label}</span>
+      <span className="label-section ink-faint">{label}</span>
       {/*
        * The separator stays in the TEXT (screen readers and the component's
        * own tests read `label = value`) but leaves the pixels: a strip of

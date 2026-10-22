@@ -329,13 +329,13 @@ function ViewerBody({
           the two share affordances. One row, chrome-thin. */}
       <div className="flex h-(--appbar-h) shrink-0 items-center gap-(--gap-group) border-b border-rule bg-panel px-(--pad-panel)">
         <span
-          className="font-display truncate text-title font-semibold text-ink"
+          className="font-display truncate text-title font-semibold ink"
           data-testid="viewer-title"
         >
           {displayTitle}
         </span>
         <span
-          className="font-mono text-micro text-ink-faint"
+          className="font-mono text-micro ink-faint"
           aria-live="polite"
           data-testid="viewer-status"
           id="viewer-status"
@@ -343,9 +343,9 @@ function ViewerBody({
           …
         </span>
         <div className="flex-1" />
-        <span className="label-section shrink-0 text-ink-faint">vol</span>
+        <span className="label-section shrink-0 ink-faint">vol</span>
         <span
-          className="shrink-0 font-mono text-data text-ink tabular"
+          className="shrink-0 font-mono text-data ink tabular"
           data-testid="viewer-volume"
           id="viewer-volume"
         >
@@ -388,7 +388,7 @@ function ViewerBody({
             </Button>
           </>
         ) : (
-          <span className="hidden font-mono text-micro text-ink-faint sm:inline">
+          <span className="hidden font-mono text-micro ink-faint sm:inline">
             standalone export — runs offline
           </span>
         )}
@@ -402,9 +402,7 @@ function ViewerBody({
       >
         {action !== null ? (
           <span
-            className={
-              action.kind === "error" ? "text-destructive" : "text-ink-dim"
-            }
+            className={action.kind === "error" ? "text-destructive" : "ink-dim"}
             data-action-kind={action.kind}
             data-testid="viewer-action"
           >
@@ -467,9 +465,9 @@ function ViewerBody({
           ) : (
             <>
               <PanelHeader title="Variables" trailing="0" />
-              <p className="p-(--pad-panel) text-ui text-ink-dim">
+              <p className="p-(--pad-panel) text-ui ink-dim">
                 Load a part to edit its variables. Edits commit as
-                <span className="font-mono text-ink"> parameter.set </span>
+                <span className="font-mono ink"> parameter.set </span>
                 commands — the geometry re-drives live.
               </p>
             </>
@@ -561,26 +559,26 @@ function ViewerEmptyState({
       <Panel elevation="overlay" className="w-full max-w-md">
         <PanelHeader title="Load a shared part" titleAs="h1" />
         <div className="p-(--pad-panel)">
-          <p className="text-body text-ink-dim">
+          <p className="text-body ink-dim">
             The viewer draws a parametric part and lets anyone re-drive it: the
             variables on the right are live, the solid follows.
           </p>
           {busy ? (
             <p
-              className="mt-3 font-mono text-data text-ink-dim"
+              className="mt-3 font-mono text-data ink-dim"
               data-testid="viewer-share-fetching"
             >
               fetching the shared part…
             </p>
           ) : null}
           <label
-            className="label-section mt-5 block text-ink-faint"
+            className="label-section mt-5 block ink-faint"
             htmlFor="viewer-paste"
           >
             Paste a native document
           </label>
           <textarea
-            className="mt-1.5 h-28 w-full rounded-sm border border-rule-strong bg-well-deep px-2 py-1.5 font-mono text-data text-ink focus-instrument placeholder:text-ink-faint"
+            className="mt-1.5 h-28 w-full rounded-sm border border-rule-strong bg-well-deep px-2 py-1.5 font-mono text-data ink focus-instrument placeholder:ink-faint"
             data-testid="viewer-paste"
             id="viewer-paste"
             onChange={(event) => setPasted(event.target.value)}
@@ -618,9 +616,7 @@ function ViewerEmptyState({
               type="file"
             />
             {fileName !== null ? (
-              <span className="font-mono text-micro text-ink-faint">
-                {fileName}
-              </span>
+              <span className="font-mono text-micro ink-faint">{fileName}</span>
             ) : null}
           </div>
           {error !== null ? (
@@ -632,7 +628,7 @@ function ViewerEmptyState({
             </p>
           ) : null}
           <div className="mt-5 border-t border-rule pt-2.5">
-            <p className="text-ui text-ink-dim">
+            <p className="text-ui ink-dim">
               {variant === "page" ? (
                 <>
                   In the workbench, <span className="font-mono">Share</span>{" "}

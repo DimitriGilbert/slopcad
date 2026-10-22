@@ -117,7 +117,7 @@ export function ExampleCard({
           </span>
         }
       />
-      <p className="border-b border-rule bg-well/60 px-(--pad-panel) py-1 font-mono text-micro text-ink-faint">
+      <p className="border-b border-rule bg-well/60 px-(--pad-panel) py-1 font-mono text-micro ink-faint">
         {source}
       </p>
       <div className="p-(--pad-panel)">
@@ -134,11 +134,9 @@ export function ExampleCard({
                 key={fact.label}
                 className="col-span-2 grid min-h-(--row-h) grid-cols-subgrid items-center gap-x-(--gap-group) border-b border-rule/60 last:border-b-0"
               >
-                <dt className="truncate text-label text-ink-dim">
-                  {fact.label}
-                </dt>
+                <dt className="truncate text-label ink-dim">{fact.label}</dt>
                 <dd
-                  className="text-right font-mono text-data text-ink tabular"
+                  className="text-right font-mono text-data ink tabular"
                   data-testid={`docs-fact-${slug(fact.label)}`}
                 >
                   {fact.value}
@@ -401,7 +399,7 @@ export function MeshExampleCard(): React.JSX.Element {
     >
       {downloadUrl !== null ? (
         <a
-          className="mt-2 inline-block font-mono text-micro text-ink-dim underline underline-offset-4 transition-colors duration-(--dur-state) hover:text-ink focus-instrument"
+          className="mt-2 inline-block font-mono text-micro ink-dim underline underline-offset-4 transition-colors duration-(--dur-state) hover:ink focus-instrument"
           href={downloadUrl}
           download="docs-example-plate.stl"
         >

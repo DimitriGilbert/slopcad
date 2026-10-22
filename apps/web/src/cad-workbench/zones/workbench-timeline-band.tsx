@@ -73,11 +73,9 @@ export function WorkbenchTimelineBand({
       data-zone="bottom"
       role="group"
     >
-      <span className="label-section shrink-0 text-ink-faint">Timeline</span>
+      <span className="label-section shrink-0 ink-faint">Timeline</span>
       {entries === null ? (
-        <span className="shrink-0 text-ui text-ink-dim">
-          {issue ?? "\u2026"}
-        </span>
+        <span className="shrink-0 text-ui ink-dim">{issue ?? "\u2026"}</span>
       ) : (
         <>
           {/* The document's history gets the FULL frame width: the feature

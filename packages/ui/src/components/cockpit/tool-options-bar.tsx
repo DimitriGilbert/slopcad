@@ -123,10 +123,8 @@ function ToolOptionsBar({
     >
       {/* The armed tool's name: the bar says WHOSE options these are, so
           the strip above does not have to be read to know. */}
-      <span className="label-section shrink-0 text-ink">
-        {descriptor.toolLabel}
-      </span>
-      <span className="shrink-0 font-mono text-micro text-ink-faint">
+      <span className="label-section shrink-0 ink">{descriptor.toolLabel}</span>
+      <span className="shrink-0 font-mono text-micro ink-faint">
         {descriptor.hint}
       </span>
       {descriptor.controls.length === 0 ? null : (
@@ -209,8 +207,8 @@ function ToolOptionsPanel({
       role="group"
       {...props}
     >
-      <p className="px-(--pad-panel) pt-(--pad-row) text-label text-ink-dim">
-        <span className="text-ink">{descriptor.toolLabel}</span>
+      <p className="px-(--pad-panel) pt-(--pad-row) text-label ink-dim">
+        <span className="ink">{descriptor.toolLabel}</span>
         {" — "}
         {descriptor.hint}
       </p>

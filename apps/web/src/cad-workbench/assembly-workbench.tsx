@@ -224,7 +224,7 @@ export function AssemblyWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 50 Assemblies fixture — instances, placements, BOM flags
         </h1>
-        <p className="text-ink-dim text-sm">
+        <p className="ink-dim text-sm">
           One plate body, its occurrences placed along +x. Add and remove
           instances; the tree and the viewport derive from the document.
         </p>

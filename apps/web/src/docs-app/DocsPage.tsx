@@ -83,9 +83,9 @@ function Section({
 }): React.JSX.Element {
   return (
     <section id={id} className="border-t border-rule pt-7">
-      <h2 className="label-section text-ink">{title}</h2>
+      <h2 className="label-section ink">{title}</h2>
       {lead !== undefined ? (
-        <p className="mt-2 max-w-[72ch] text-body text-ink-dim">{lead}</p>
+        <p className="mt-2 max-w-[72ch] text-body ink-dim">{lead}</p>
       ) : null}
       <div className="mt-4">{children}</div>
     </section>
@@ -94,7 +94,7 @@ function Section({
 
 /** A table cell's shared metrics: the manual is a reference, so rows are
  * row-height, hairline-separated, and every value is tabular mono. */
-const TABLE_HEAD_CELL = "label-section px-2 py-1.5 text-left text-ink-faint";
+const TABLE_HEAD_CELL = "label-section px-2 py-1.5 text-left ink-faint";
 const TABLE_ROW =
   "border-b border-rule/60 transition-colors duration-(--dur-state) last:border-b-0 hover:bg-well";
 
@@ -119,7 +119,7 @@ function RenderProofCard(): React.JSX.Element {
           </span>
         }
       />
-      <p className="border-b border-rule bg-well/60 px-(--pad-panel) py-1 font-mono text-micro text-ink-faint">
+      <p className="border-b border-rule bg-well/60 px-(--pad-panel) py-1 font-mono text-micro ink-faint">
         packages/docs-examples/src/core/projection.ts → @slopcad/ui CadViewport
       </p>
       {/* The render sits on the viewport surface, flush to the panel — the
@@ -133,7 +133,7 @@ function RenderProofCard(): React.JSX.Element {
           }}
         />
       </div>
-      <p className="border-t border-rule p-(--pad-panel) text-ui text-ink-dim">
+      <p className="border-t border-rule p-(--pad-panel) text-ui ink-dim">
         The same kernel-neutral projection data the GLB exporter consumes, drawn
         by the registry&apos;s own CAD viewport component: geometry, camera, and
         lights from the deterministic scene, no host state.
@@ -194,7 +194,7 @@ function TopicRail(): React.JSX.Element {
               <a
                 href={`#group-${group.id}`}
                 className={`label-section block transition-colors duration-(--dur-state) focus-instrument ${
-                  groupActive ? "text-ink" : "text-ink-faint hover:text-ink-dim"
+                  groupActive ? "ink" : "ink-faint hover:ink-dim"
                 }`}
               >
                 {group.title}
@@ -211,8 +211,8 @@ function TopicRail(): React.JSX.Element {
                            and bright ink, never an accent-coloured label. */
                         className={`-ml-px flex min-h-(--row-h) items-center border-l-2 pl-2.5 text-ui transition-colors duration-(--dur-state) focus-instrument ${
                           topicActive
-                            ? "border-l-select-edge text-ink"
-                            : "border-l-transparent text-ink-dim hover:border-l-rule-strong hover:text-ink"
+                            ? "border-l-select-edge ink"
+                            : "border-l-transparent ink-dim hover:border-l-rule-strong hover:ink"
                         }`}
                       >
                         {topic.title}
@@ -236,7 +236,7 @@ export function DocsPage(): React.JSX.Element {
     [],
   );
   return (
-    <div className="min-h-screen bg-chrome text-ink">
+    <div className="min-h-screen bg-chrome ink">
       <header className="sticky top-0 z-10 border-b border-rule bg-chrome/95 backdrop-blur-sm">
         <div className="mx-auto flex h-(--appbar-h) max-w-[1180px] items-center gap-(--gap-group) px-6">
           <Link
@@ -245,10 +245,10 @@ export function DocsPage(): React.JSX.Element {
             to="/"
           >
             <PlateMark className="size-3 rounded-[3px]" />
-            <span className="font-display text-title font-semibold text-ink">
+            <span className="font-display text-title font-semibold ink">
               slopcad
             </span>
-            <span className="font-mono text-micro text-ink-faint">/docs</span>
+            <span className="font-mono text-micro ink-faint">/docs</span>
           </Link>
           <nav
             aria-label="Sections"
@@ -258,7 +258,7 @@ export function DocsPage(): React.JSX.Element {
               <a
                 key={link.id}
                 href={`#${link.id}`}
-                className="flex h-(--tool-h) items-center rounded-sm px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) hover:bg-well hover:text-ink focus-instrument"
+                className="flex h-(--tool-h) items-center rounded-sm px-2 text-ui font-medium ink-dim transition-colors duration-(--dur-state) hover:bg-well hover:ink focus-instrument"
               >
                 {link.label}
               </a>
@@ -275,20 +275,20 @@ export function DocsPage(): React.JSX.Element {
         <TopicRail />
         <main className="min-w-0 space-y-8">
           <section>
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">
+            <h1 className="font-display text-2xl font-semibold tracking-tight ink">
               The slopcad documentation
             </h1>
-            <p className="mt-3 max-w-[72ch] text-body text-ink-dim">
+            <p className="mt-3 max-w-[72ch] text-body ink-dim">
               Every guide lives in the repository under{" "}
-              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data text-ink">
+              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data ink">
                 docs/guides/
               </code>
               , and every primary public API gets a runnable example under{" "}
-              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data text-ink">
+              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data ink">
                 packages/docs-examples/
               </code>{" "}
               that the workspace gates typecheck, build, and run.{" "}
-              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data text-ink">
+              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data ink">
                 pnpm verify
               </code>{" "}
               proves them, this page proves them again in your browser. The
@@ -356,7 +356,7 @@ export function DocsPage(): React.JSX.Element {
                     <tr key={column.flag} className={TABLE_ROW}>
                       <th
                         scope="row"
-                        className="h-(--row-h) px-2 text-left text-ui font-normal text-ink-dim"
+                        className="h-(--row-h) px-2 text-left text-ui font-normal ink-dim"
                       >
                         {column.label}
                       </th>
@@ -371,7 +371,7 @@ export function DocsPage(): React.JSX.Element {
                             <span
                               aria-hidden="true"
                               className={
-                                supported ? "text-ink" : "text-ink-faint/60"
+                                supported ? "ink" : "ink-faint opacity-60"
                               }
                             >
                               {supported ? "✓" : "—"}
@@ -387,7 +387,7 @@ export function DocsPage(): React.JSX.Element {
                 </tbody>
               </table>
             </Panel>
-            <p className="mt-2 font-mono text-micro text-ink-faint">
+            <p className="mt-2 font-mono text-micro ink-faint">
               ✓ declared · — declined (answers kernel/unsupported-operation)
             </p>
           </Section>
@@ -426,14 +426,14 @@ export function DocsPage(): React.JSX.Element {
                     <tr key={row.format} className={TABLE_ROW}>
                       <th
                         scope="row"
-                        className="px-2 py-1.5 text-left font-mono text-data font-normal text-ink"
+                        className="px-2 py-1.5 text-left font-mono text-data font-normal ink"
                       >
                         {row.format}
                       </th>
-                      <td className="px-2 py-1.5 text-ui text-ink-dim">
+                      <td className="px-2 py-1.5 text-ui ink-dim">
                         {row.direction}
                       </td>
-                      <td className="px-2 py-1.5 text-ui text-ink-dim">
+                      <td className="px-2 py-1.5 text-ui ink-dim">
                         {row.carries}
                       </td>
                       {/* The one format that preserves history is the one
@@ -444,7 +444,7 @@ export function DocsPage(): React.JSX.Element {
                           className={
                             row.history
                               ? "font-medium text-signal"
-                              : "text-ink-faint/60"
+                              : "ink-faint opacity-60"
                           }
                           data-testid={`docs-format-${row.format.split(" ")[0]?.toLowerCase()}`}
                         >
@@ -473,18 +473,18 @@ export function DocsPage(): React.JSX.Element {
                       className="scroll-mt-14 border-b border-rule/60 px-(--pad-panel) py-2 transition-colors duration-(--dur-state) last:border-b-0 hover:bg-well"
                     >
                       <div className="flex flex-wrap items-baseline justify-between gap-x-(--gap-group) gap-y-1">
-                        <h3 className="text-ui font-medium text-ink">
+                        <h3 className="text-ui font-medium ink">
                           {topic.title}
                         </h3>
-                        <code className="font-mono text-micro text-ink-faint">
+                        <code className="font-mono text-micro ink-faint">
                           {topic.guide}
                         </code>
                       </div>
-                      <p className="mt-0.5 max-w-[80ch] text-ui text-ink-dim">
+                      <p className="mt-0.5 max-w-[80ch] text-ui ink-dim">
                         {topic.summary}
                       </p>
                       {topic.example !== null ? (
-                        <p className="mt-1 font-mono text-micro text-ink-faint">
+                        <p className="mt-1 font-mono text-micro ink-faint">
                           example: {topic.example}
                         </p>
                       ) : null}

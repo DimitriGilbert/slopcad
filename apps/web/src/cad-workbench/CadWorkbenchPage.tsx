@@ -287,11 +287,11 @@ export function WorkbenchLayout({
           data-testid="feature-timeline"
           role="group"
         >
-          <span className="text-ink-dim mr-1 text-xs font-medium tracking-wider uppercase">
+          <span className="ink-dim mr-1 text-xs font-medium tracking-wider uppercase">
             Timeline
           </span>
           {timeline === null ? (
-            <span className="text-ink-dim text-xs">
+            <span className="ink-dim text-xs">
               {regenerationIssue ?? "\u2026"}
             </span>
           ) : (
@@ -468,7 +468,7 @@ export function WorkbenchLayout({
           Hidden in sketch mode — the sketch editor carries its own status
           line — but MOUNTED, so the writer's ids keep existing. */}
       <div
-        className={`border-rule bg-chrome text-ink-dim h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
+        className={`border-rule bg-chrome ink-dim h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >

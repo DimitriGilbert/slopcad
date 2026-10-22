@@ -210,14 +210,14 @@ export interface CadPropertyPanelProps {
 const STATUS_PRESENTATION: Readonly<
   Record<FeatureRegenerationStatus["state"], string>
 > = Object.freeze({
-  valid: "text-ink-dim",
+  valid: "ink-dim",
   // `stale` is a WARN status, so it rides the system's warn colour (the
   // one `StatusDot` uses) instead of a raw Tailwind amber — a second amber
   // family beside the scheme's own signal was two accents pretending to be
   // one.
   stale: "text-signal",
   failed: "text-destructive font-medium",
-  suppressed: "text-ink-dim italic",
+  suppressed: "ink-dim italic",
 });
 
 /** One name-resolved piece of an input summary: what the ref points at. */
@@ -620,11 +620,11 @@ export function CadPropertyPanel({
         />
       )}
       {cadDocument === undefined ? (
-        <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
+        <p className="px-(--pad-row) py-(--gap) text-ui ink-dim">
           {labels.emptyDocument}
         </p>
       ) : selection.length === 0 ? (
-        <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
+        <p className="px-(--pad-row) py-(--gap) text-ui ink-dim">
           {labels.emptySelection}
         </p>
       ) : (

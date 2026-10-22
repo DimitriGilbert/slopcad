@@ -179,10 +179,7 @@ export function WorkbenchMeasurementSection({
             <span id="workbench-measure-readout" className="block break-words">
               {distanceText}
             </span>
-            <span
-              id="workbench-distance-source"
-              className="block text-ink-faint"
-            >
+            <span id="workbench-distance-source" className="block ink-faint">
               {distanceSource}
             </span>
           </MeasurementRow>
@@ -190,10 +187,7 @@ export function WorkbenchMeasurementSection({
             <span id="workbench-bounds-readout" className="block break-words">
               {boundsState.text}
             </span>
-            <span
-              id="workbench-bounds-tightness"
-              className="block text-ink-faint"
-            >
+            <span id="workbench-bounds-tightness" className="block ink-faint">
               {boundsState.tightness === "tight"
                 ? "tight"
                 : "may be conservative"}
@@ -206,7 +200,7 @@ export function WorkbenchMeasurementSection({
             <span id="workbench-radius-diameter" className="block break-words">
               {radiusState.diameterText}
             </span>
-            <span id="workbench-radius-source" className="block text-ink-faint">
+            <span id="workbench-radius-source" className="block ink-faint">
               {radiusState.source}
             </span>
           </MeasurementRow>
@@ -234,14 +228,14 @@ export function WorkbenchMeasurementSection({
             <span
               id="workbench-section-centroid-readout"
               data-testid="section-centroid"
-              className="block text-ink-faint"
+              className="block ink-faint"
             >
               {sectionState.centroidText}
             </span>
           </MeasurementRow>
         </div>
       ) : (
-        <p className="px-(--pad-row) py-(--gap) font-mono text-data text-ink-dim">
+        <p className="px-(--pad-row) py-(--gap) font-mono text-data ink-dim">
           select a body to measure
         </p>
       )}

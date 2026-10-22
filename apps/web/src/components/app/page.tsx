@@ -40,18 +40,16 @@ export function PageHeader({
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-x-(--gap-group) gap-y-(--gap)">
       <div className="min-w-0">
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">
+        <h1 className="font-display text-2xl font-semibold tracking-tight ink">
           {title}
         </h1>
         {lead === undefined || lead === "" ? null : (
-          <p className="mt-2 max-w-[72ch] text-body text-ink-dim">{lead}</p>
+          <p className="mt-2 max-w-[72ch] text-body ink-dim">{lead}</p>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-(--gap-group)">
         {meta === undefined || meta === "" ? null : (
-          <span className="font-mono text-data text-ink-faint tabular">
-            {meta}
-          </span>
+          <span className="font-mono text-data ink-faint tabular">{meta}</span>
         )}
         {actions}
       </div>

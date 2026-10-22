@@ -247,11 +247,11 @@ export function ToolFlyout({
               aria-label={`${label} family`}
               className={cn(
                 "flex h-(--tool-h) w-3 shrink-0 items-center justify-center",
-                "rounded-sm rounded-s-none border border-transparent text-ink-faint",
+                "rounded-sm rounded-s-none border border-transparent ink-faint",
                 "transition-[background-color,color] duration-(--dur-state)",
                 "ease-(--ease-instrument) focus-instrument",
-                "hover:bg-well hover:text-ink aria-expanded:bg-well",
-                "aria-expanded:text-ink",
+                "hover:bg-well hover:ink aria-expanded:bg-well",
+                "aria-expanded:ink",
               )}
               data-slot="tool-flyout-trigger"
               data-testid={triggerTestId}
@@ -279,12 +279,12 @@ export function ToolFlyout({
                 <button
                   className={cn(
                     "flex h-(--row-h-lg) items-center gap-(--gap) rounded-sm px-(--pad-row)",
-                    "text-left text-ui text-ink-dim focus-instrument",
+                    "text-left text-ui ink-dim focus-instrument",
                     "transition-[background-color,color] duration-(--dur-state)",
                     "ease-(--ease-instrument)",
-                    "hover:not-disabled:bg-well hover:not-disabled:text-ink",
-                    "disabled:pointer-events-none disabled:text-ink-faint",
-                    "data-faced:bg-well data-faced:text-ink",
+                    "hover:not-disabled:bg-well hover:not-disabled:ink",
+                    "disabled:pointer-events-none disabled:ink-faint",
+                    "data-faced:bg-well data-faced:ink",
                     "[&_svg]:size-3.5 [&_svg]:shrink-0",
                   )}
                   data-faced={item.id === face.id ? "" : undefined}

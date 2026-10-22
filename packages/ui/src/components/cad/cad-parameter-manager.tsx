@@ -509,7 +509,7 @@ function ManagerExpressionInput({
             }
           >
             {suggestions.length === 0 ? (
-              <div className="text-ink-dim px-3 py-2 text-sm">
+              <div className="ink-dim px-3 py-2 text-sm">
                 {context.noSuggestions}
               </div>
             ) : (
@@ -541,7 +541,7 @@ function ManagerExpressionInput({
       {preview === undefined ? null : (
         <span
           aria-hidden="true"
-          className="text-ink-dim mt-1 block font-mono text-label"
+          className="ink-dim mt-1 block font-mono text-label"
         >
           {`= ${preview}`}
         </span>
@@ -871,14 +871,14 @@ function ParameterManagerRow({
         <span
           className={cn(
             "font-mono text-xs",
-            parameter.expression === null ? "text-ink-dim" : "text-foreground",
+            parameter.expression === null ? "ink-dim" : "text-foreground",
           )}
         >
           {parameter.expression === null ? quantity : `= ${quantity}`}
         </span>
       </div>
       {dependencies.length > 0 || usedBy > 0 ? (
-        <div className="text-ink-dim mt-0.5 font-mono text-label">
+        <div className="ink-dim mt-0.5 font-mono text-label">
           {dependencies.length > 0
             ? `${labels.dependsOn} ${dependencies.join(", ")}`
             : null}
@@ -1210,14 +1210,14 @@ export function CadParameterManager({
           aria-label={mergedLabels.createTitle}
           className="border-rule border-b px-2.5 py-2"
         >
-          <h3 className="text-ink-dim pb-1.5 font-mono text-micro font-medium tracking-[0.08em] uppercase">
+          <h3 className="ink-dim pb-1.5 font-mono text-micro font-medium tracking-[0.08em] uppercase">
             {mergedLabels.createTitle}
           </h3>
           <createForm.Form className="space-y-2" />
         </section>
         <div className="px-2.5 py-2">
           {parameters.length === 0 ? (
-            <p className="text-ink-dim text-xs">{mergedLabels.empty}</p>
+            <p className="ink-dim text-xs">{mergedLabels.empty}</p>
           ) : (
             parameters.map((parameter) => (
               <ParameterManagerRow

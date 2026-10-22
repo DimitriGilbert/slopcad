@@ -78,7 +78,7 @@ function ProjectsPage(): ReactElement {
           <Panel data-testid="create-project-panel">
             <PanelHeader title="New project" titleAs="h2" />
             <div className="p-(--pad-panel)">
-              <p className="mb-(--gap) text-ui text-ink-dim">
+              <p className="mb-(--gap) text-ui ink-dim">
                 Projects group documents and their version history.
               </p>
               <CreateProjectForm onSubmitted={handleCreate} />
@@ -110,8 +110,8 @@ function ProjectsPage(): ReactElement {
             </p>
           ) : projects.length === 0 ? (
             <div className="p-(--gap-group)">
-              <p className="text-title text-ink">No projects yet</p>
-              <p className="mt-1 max-w-[72ch] text-body text-ink-dim">
+              <p className="text-title ink">No projects yet</p>
+              <p className="mt-1 max-w-[72ch] text-body ink-dim">
                 Name one in the New project panel and it appears here, ready for
                 its first document.
               </p>

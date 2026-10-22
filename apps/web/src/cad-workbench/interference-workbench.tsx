@@ -517,7 +517,7 @@ export function InterferenceWorkbenchPage(): ReactElement {
         <h1 className="text-lg font-semibold">
           Phase 58 interference fixture — report panel, isolation, snapshots
         </h1>
-        <p className="text-ink-dim text-sm">
+        <p className="ink-dim text-sm">
           A plate, an overlapping block, and a clear block. Run the check to
           fill the report panel; isolate a pair; export the snapshot.
         </p>
@@ -579,19 +579,19 @@ export function InterferenceWorkbenchPage(): ReactElement {
       >
         <h2 className="text-sm font-semibold">Interference report</h2>
         {model.status === "idle" ? (
-          <p className="text-ink-dim mt-2 text-sm">
+          <p className="ink-dim mt-2 text-sm">
             No report yet — run the check. The panel shows nothing before a
             report exists.
           </p>
         ) : (
           <>
-            <p className="text-ink-dim mt-1 text-xs">
+            <p className="ink-dim mt-1 text-xs">
               checked {model.checkedCount} · interfering {model.pairCount} ·
               skipped {model.skippedCount} · clearances {model.clearanceCount}
             </p>
             <table className="mt-2 w-full text-left text-sm">
               <thead>
-                <tr className="text-ink-dim text-xs">
+                <tr className="ink-dim text-xs">
                   <th className="py-1 pr-3 font-medium">First</th>
                   <th className="py-1 pr-3 font-medium">Second</th>
                   <th className="py-1 pr-3 font-medium">Verdict</th>

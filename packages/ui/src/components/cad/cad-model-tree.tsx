@@ -324,7 +324,7 @@ const STATUS_PRESENTATION: Readonly<
   // The healthy state stays quiet; failures are the only loud row.
   valid: Object.freeze({
     dot: "bg-ink-faint/60",
-    text: "text-ink-dim",
+    text: "ink-dim",
   }),
   stale: Object.freeze({
     dot: "bg-signal",
@@ -336,7 +336,7 @@ const STATUS_PRESENTATION: Readonly<
   }),
   suppressed: Object.freeze({
     dot: "border-ink-faint bg-transparent",
-    text: "text-ink-faint italic",
+    text: "ink-faint italic",
   }),
 });
 
@@ -598,7 +598,7 @@ function collapsedWithout(
 /** The visibility eye (Phase 44): inline SVG, the ChevronIcon precedent. */
 /** The shared affordance-button classes of the body rows. */
 const buttonClass = cn(
-  "text-ink-dim hover:text-ink",
+  "ink-dim hover:ink",
   "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
 );
 
@@ -793,14 +793,14 @@ function AssemblyChips({
   return (
     <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
       <span
-        className="hidden font-mono text-micro text-ink-faint group-hover:inline"
+        className="hidden font-mono text-micro ink-faint group-hover:inline"
         title={sourceTitle}
       >
         {sourceLabel}
       </span>
       {node.bomFlag !== undefined ? (
         <span
-          className="rounded-[3px] border border-rule bg-well px-1 font-mono text-micro text-ink-dim leading-[15px]"
+          className="rounded-[3px] border border-rule bg-well px-1 font-mono text-micro ink-dim leading-[15px]"
           data-cad-tree-bom={node.bomFlag}
         >
           {node.bomFlag === "phantom" ? labels.bomPhantom : labels.bomPurchased}
@@ -991,7 +991,7 @@ function AppearancePicker({
             </button>
           ))}
           <button
-            className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-ui text-ink-dim hover:bg-well"
+            className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-ui ink-dim hover:bg-well"
             data-testid="appearance-preset-none"
             onClick={(event) => {
               event.stopPropagation();
@@ -1244,7 +1244,7 @@ export function CadModelTree({
           {collapsible ? (
             <span
               aria-hidden="true"
-              className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+              className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center ink-dim hover:ink"
               data-cad-tree-toggle=""
               title={expanded ? labels.collapse : labels.expand}
               onClick={(event) => {
@@ -1257,7 +1257,7 @@ export function CadModelTree({
           ) : (
             <span
               aria-hidden="true"
-              className="inline-flex size-4 shrink-0 items-center justify-center font-mono text-micro text-ink-faint"
+              className="inline-flex size-4 shrink-0 items-center justify-center font-mono text-micro ink-faint"
             >
               {row.depth > 0 ? "·" : ""}
             </span>
@@ -1268,7 +1268,7 @@ export function CadModelTree({
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
-              row.depth === 0 ? "font-medium" : "text-ink-dim",
+              row.depth === 0 ? "font-medium" : "ink-dim",
             )}
           >
             {row.label}
@@ -1324,7 +1324,7 @@ export function CadModelTree({
       {/* The card look's own name band. A rail supplies the name through
           its `PanelSection`, so the flush tree never draws a second one. */}
       {flush ? null : (
-        <div className="label-section border-b border-rule bg-well/60 px-2.5 py-1.5 text-ink-faint">
+        <div className="label-section border-b border-rule bg-well/60 px-2.5 py-1.5 ink-faint">
           {labels.treeLabel}
         </div>
       )}
@@ -1332,8 +1332,8 @@ export function CadModelTree({
         <div
           className={cn(
             flush
-              ? "px-(--pad-row) py-(--gap) text-ui text-ink-dim"
-              : "px-2.5 py-2 text-ui text-ink-dim",
+              ? "px-(--pad-row) py-(--gap) text-ui ink-dim"
+              : "px-2.5 py-2 text-ui ink-dim",
           )}
         >
           {labels.emptyDocument}

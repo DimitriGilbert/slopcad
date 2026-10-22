@@ -1187,11 +1187,11 @@ function CadChainWorkbenchBody({
           data-testid="feature-timeline"
           role="group"
         >
-          <span className="text-ink-dim mr-1 text-xs font-medium tracking-wider uppercase">
+          <span className="ink-dim mr-1 text-xs font-medium tracking-wider uppercase">
             Timeline
           </span>
           {timeline === null ? (
-            <span className="text-ink-dim text-xs">
+            <span className="ink-dim text-xs">
               {regenerationIssue ?? "\u2026"}
             </span>
           ) : (
@@ -1334,12 +1334,12 @@ function CadChainWorkbenchBody({
               aria-label="Measurement"
               className="border-rule bg-chrome w-48 border"
             >
-              <div className="text-ink-dim border-rule border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+              <div className="ink-dim border-rule border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
                 Measurement
               </div>
               <div className="px-2 py-2 text-sm">
                 {measureText === null ? (
-                  <span className="text-ink-dim font-mono">—</span>
+                  <span className="ink-dim font-mono">—</span>
                 ) : (
                   <span id="chain-measure-readout" className="font-mono">
                     {`${measureText} mm`}
@@ -1387,7 +1387,7 @@ function CadChainWorkbenchBody({
       </div>
       {/* Status bar: the settled numbers and the structured failure. */}
       <div
-        className={`border-rule bg-chrome text-ink-dim h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
+        className={`border-rule bg-chrome ink-dim h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
@@ -1431,7 +1431,7 @@ function CadChainWorkbenchBody({
             <DialogHeader>
               <DialogTitle>{CAD_FEATURE_FORM_LABELS.holeTitle}</DialogTitle>
             </DialogHeader>
-            <p className="text-ink-dim text-xs leading-snug">
+            <p className="ink-dim text-xs leading-snug">
               {CAD_FEATURE_FORM_LABELS.holeHint}
             </p>
             {structuredHoleOutcome !== null && !structuredHoleOutcome.ok ? (

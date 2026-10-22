@@ -61,10 +61,10 @@ export default function SignUpForm({
 
   return (
     <div className="w-full max-w-sm">
-      <h1 className="font-display text-title font-semibold tracking-tight text-ink">
+      <h1 className="font-display text-title font-semibold tracking-tight ink">
         Create account
       </h1>
-      <p className="mt-1 mb-(--gap-group) text-ui text-ink-dim">
+      <p className="mt-1 mb-(--gap-group) text-ui ink-dim">
         One account keeps your projects, documents, and edit history.
       </p>
 
@@ -164,7 +164,7 @@ export default function SignUpForm({
 
       <div className="mt-(--gap-group) text-center">
         <Button
-          className="text-ui text-ink-dim underline-offset-4 hover:text-ink"
+          className="text-ui ink-dim underline-offset-4 hover:ink"
           onClick={onSwitchToSignIn}
           variant="ghost"
           size="sm"

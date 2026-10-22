@@ -51,8 +51,8 @@ function Swatch({
         data-testid={`swatch-${name}`}
         className={`h-10 rounded-sm ${frame ? "border border-rule" : ""} ${className}`}
       />
-      <span className="truncate font-mono text-micro text-ink">{name}</span>
-      <span className="truncate text-micro text-ink-faint">{role}</span>
+      <span className="truncate font-mono text-micro ink">{name}</span>
+      <span className="truncate text-micro ink-faint">{role}</span>
     </div>
   );
 }
@@ -70,8 +70,8 @@ function Block({
   return (
     <section className="flex flex-col gap-(--gap-group) border-t border-rule pt-(--gap-group)">
       <header className="flex flex-col gap-(--gap-tight)">
-        <h2 className="label-section text-ink">{title}</h2>
-        <p className="max-w-[72ch] text-body text-ink-dim">{note}</p>
+        <h2 className="label-section ink">{title}</h2>
+        <p className="max-w-[72ch] text-body ink-dim">{note}</p>
       </header>
       {children}
     </section>
@@ -146,8 +146,8 @@ export function DesignSystemPage(): ReactElement {
     >
       <header className="flex flex-wrap items-end justify-between gap-(--gap-group)">
         <div className="flex flex-col gap-1">
-          <h1 className="font-display text-xl text-ink">Instrument system</h1>
-          <p className="max-w-[72ch] text-body text-ink-dim">
+          <h1 className="font-display text-xl ink">Instrument system</h1>
+          <p className="max-w-[72ch] text-body ink-dim">
             One elevation ramp, one ink ramp, two rule weights, six type sizes
             and a fixed set of control heights. Four schemes and two registers
             reuse all of it — a scheme supplies hue and chroma, never a metric.
@@ -200,27 +200,25 @@ export function DesignSystemPage(): ReactElement {
         <div className="flex flex-col gap-(--gap-group)">
           <div className="grid grid-cols-3 gap-(--gap-group)">
             <div className="flex flex-col gap-(--gap-tight)">
-              <span className="text-ui text-ink">ink</span>
-              <span className="text-micro text-ink-faint">primary text</span>
+              <span className="text-ui ink">ink</span>
+              <span className="text-micro ink-faint">primary text</span>
             </div>
             <div className="flex flex-col gap-(--gap-tight)">
-              <span className="text-ui text-ink-dim">ink-dim</span>
-              <span className="text-micro text-ink-faint">
+              <span className="text-ui ink-dim">ink-dim</span>
+              <span className="text-micro ink-faint">
                 labels and idle controls
               </span>
             </div>
             <div className="flex flex-col gap-(--gap-tight)">
-              <span className="text-ui text-ink-faint">ink-faint</span>
-              <span className="text-micro text-ink-faint">
-                units and counts
-              </span>
+              <span className="text-ui ink-faint">ink-faint</span>
+              <span className="text-micro ink-faint">units and counts</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-(--gap-group)">
-            <div className="border-t border-rule pt-1.5 text-micro text-ink-faint">
+            <div className="border-t border-rule pt-1.5 text-micro ink-faint">
               rule — separates rows and sections
             </div>
-            <div className="border-t border-rule-strong pt-1.5 text-micro text-ink-faint">
+            <div className="border-t border-rule-strong pt-1.5 text-micro ink-faint">
               rule-strong — encloses a surface
             </div>
           </div>
@@ -237,10 +235,10 @@ export function DesignSystemPage(): ReactElement {
               key={specimen.token}
               className="grid grid-cols-[8rem_1fr] items-baseline gap-(--gap-group) border-b border-rule/60 py-1.5 last:border-b-0"
             >
-              <span className="font-mono text-micro text-ink-faint">
+              <span className="font-mono text-micro ink-faint">
                 {specimen.token}
               </span>
-              <span className={`${specimen.className} text-ink`}>
+              <span className={`${specimen.className} ink`}>
                 Extrude 12.500 mm — {specimen.job}
               </span>
             </div>
@@ -258,10 +256,8 @@ export function DesignSystemPage(): ReactElement {
               key={metric.token}
               className="flex items-baseline justify-between gap-2 border-b border-rule/60 py-1"
             >
-              <span className="font-mono text-micro text-ink">
-                {metric.token}
-              </span>
-              <span className="font-mono text-micro text-ink-dim tabular">
+              <span className="font-mono text-micro ink">{metric.token}</span>
+              <span className="font-mono text-micro ink-dim tabular">
                 {metric.value}
               </span>
             </div>
@@ -300,7 +296,7 @@ export function DesignSystemPage(): ReactElement {
             <ToolButton size="sm">Iso</ToolButton>
           </ToolGroup>
           <ToolGroup label="Shortcut hints">
-            <span className="flex items-center gap-1 text-micro text-ink-faint">
+            <span className="flex items-center gap-1 text-micro ink-faint">
               commands <KeyCap>Ctrl</KeyCap>
               <KeyCap>K</KeyCap>
             </span>
@@ -353,7 +349,7 @@ export function DesignSystemPage(): ReactElement {
             <Panel elevation="overlay">
               <PanelHeader title="Overlay surface" titleAs="h3" />
               <PanelBody inset>
-                <p className="text-body text-ink-dim">
+                <p className="text-body ink-dim">
                   The only rung with a shadow: menus, the command palette,
                   dialogs. Everything docked stays flat.
                 </p>
@@ -390,7 +386,7 @@ export function DesignSystemPage(): ReactElement {
               {STATUSES.map((status) => (
                 <span
                   key={status.tone}
-                  className="flex items-center gap-1.5 text-ui text-ink-dim"
+                  className="flex items-center gap-1.5 text-ui ink-dim"
                 >
                   <StatusDot tone={status.tone} label={status.label} />
                   {status.label}

@@ -45,12 +45,12 @@ const toolButtonVariants = cva(
     // deletes it (see the ink utilities in cockpit.css).
     "ink-dim transition-[background-color,color,border-color]",
     "duration-(--dur-state) ease-(--ease-instrument) focus-instrument",
-    "hover:not-disabled:bg-well hover:not-disabled:text-ink",
+    "hover:not-disabled:bg-well hover:not-disabled:ink",
     "active:not-disabled:translate-y-px",
-    "disabled:pointer-events-none disabled:text-ink-faint disabled:opacity-60",
+    "disabled:pointer-events-none disabled:ink-faint disabled:opacity-60",
     // Armed: the one sanctioned appearance of the signal colour on a control.
     "aria-pressed:border-select-edge/45 aria-pressed:bg-select-wash",
-    "aria-pressed:text-ink",
+    "aria-pressed:ink",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
     "[&_svg:not([class*='size-'])]:size-3.5",
   ],
@@ -73,7 +73,7 @@ const toolButtonVariants = cva(
          * over the armed rules above because a variant's classes merge
          * after the base's. */
         value:
-          "aria-pressed:border-rule-strong aria-pressed:bg-panel-raised aria-pressed:text-ink",
+          "aria-pressed:border-rule-strong aria-pressed:bg-panel-raised aria-pressed:ink",
       },
     },
     defaultVariants: { size: "default", tone: "default" },

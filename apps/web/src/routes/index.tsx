@@ -83,10 +83,10 @@ function HomeComponent() {
             render is the only large element on the page. */}
         <section className="grid items-start gap-(--gap-group) lg:grid-cols-[minmax(0,1fr)_minmax(0,600px)] lg:gap-10">
           <div>
-            <h1 className="font-display max-w-2xl text-3xl leading-[1.15] font-semibold tracking-tight text-balance text-ink">
+            <h1 className="font-display max-w-2xl text-3xl leading-[1.15] font-semibold tracking-tight text-balance ink">
               Parametric CAD with a document that tells the truth.
             </h1>
-            <p className="mt-4 max-w-xl text-body text-ink-dim">
+            <p className="mt-4 max-w-xl text-body ink-dim">
               Kernel-neutral geometry, real feature history, and reusable
               components, proven by the same workspace gates that build them.
             </p>
@@ -98,7 +98,7 @@ function HomeComponent() {
                 Open the workbench
               </Link>
               <Link
-                className="inline-flex h-8 items-center rounded-sm border border-rule-strong px-3 text-ui font-medium text-ink transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well focus-instrument"
+                className="inline-flex h-8 items-center rounded-sm border border-rule-strong px-3 text-ui font-medium ink transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well focus-instrument"
                 to="/docs"
               >
                 Read the docs
@@ -110,7 +110,7 @@ function HomeComponent() {
                   word — the status is never carried by the hue alone. */}
               <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
                 <dt className="sr-only">api</dt>
-                <dd className="flex items-center gap-1.5 font-mono text-data text-ink-dim tabular">
+                <dd className="flex items-center gap-1.5 font-mono text-data ink-dim tabular">
                   <span
                     aria-hidden="true"
                     className={`size-1.5 rounded-full ${
@@ -141,7 +141,7 @@ function HomeComponent() {
                 projection={projection}
               />
             </div>
-            <p className="border-t border-rule px-(--pad-panel) py-1.5 font-mono text-micro text-ink-faint">
+            <p className="border-t border-rule px-(--pad-panel) py-1.5 font-mono text-micro ink-faint">
               rendered live by the deterministic scene — drag to orbit, scroll
               to zoom
             </p>
@@ -164,15 +164,15 @@ function HomeComponent() {
                 to={surface.to}
               >
                 <span className="flex items-baseline gap-2">
-                  <span className="font-display text-ui font-semibold text-ink">
+                  <span className="font-display text-ui font-semibold ink">
                     {surface.title}
                   </span>
-                  <span className="whitespace-nowrap font-mono text-micro text-ink-faint">
+                  <span className="whitespace-nowrap font-mono text-micro ink-faint">
                     {surface.meta}
                   </span>
                 </span>
-                <span className="text-ui text-ink-dim">{surface.body}</span>
-                <span className="font-mono text-micro text-ink-faint transition-colors duration-(--dur-state) group-hover:text-ink-dim">
+                <span className="text-ui ink-dim">{surface.body}</span>
+                <span className="font-mono text-micro ink-faint transition-colors duration-(--dur-state) group-hover:ink-dim">
                   {surface.to.replace("/$componentId", "")}
                 </span>
               </Link>

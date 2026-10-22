@@ -35,14 +35,12 @@ export function ProjectRow({
       to="/projects/$projectId"
     >
       <span className="flex min-w-0 flex-col">
-        <span className="truncate text-ui font-medium text-ink">
-          {project.name}
-        </span>
+        <span className="truncate text-ui font-medium ink">{project.name}</span>
         {described === null ? null : (
-          <span className="truncate text-ui text-ink-dim">{described}</span>
+          <span className="truncate text-ui ink-dim">{described}</span>
         )}
       </span>
-      <span className="flex shrink-0 items-center gap-(--gap-group) font-mono text-micro text-ink-faint tabular">
+      <span className="flex shrink-0 items-center gap-(--gap-group) font-mono text-micro ink-faint tabular">
         <span>{plural(project.documentCount, "document")}</span>
         <span>{formatStamp(project.updatedAt)}</span>
       </span>

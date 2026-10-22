@@ -723,7 +723,7 @@ export function CadParameterPanel({
           parameters={collection?.parameters ?? []}
         />
       ) : !hasParameters ? (
-        <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
+        <p className="px-(--pad-row) py-(--gap) text-ui ink-dim">
           {mergedLabels.empty}
         </p>
       ) : (

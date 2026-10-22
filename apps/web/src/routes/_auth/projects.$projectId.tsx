@@ -116,7 +116,7 @@ function ProjectDetailPage(): ReactElement {
           <Panel data-testid="create-document-panel">
             <PanelHeader title="New document" titleAs="h2" />
             <div className="p-(--pad-panel)">
-              <p className="mb-(--gap) text-ui text-ink-dim">
+              <p className="mb-(--gap) text-ui ink-dim">
                 One document holds one model and its saved versions.
               </p>
               <CreateDocumentForm onSubmitted={handleCreateDocument} />
@@ -145,8 +145,8 @@ function ProjectDetailPage(): ReactElement {
             </p>
           ) : documents.length === 0 ? (
             <div className="p-(--gap-group)">
-              <p className="text-title text-ink">No documents yet</p>
-              <p className="mt-1 max-w-[72ch] text-body text-ink-dim">
+              <p className="text-title ink">No documents yet</p>
+              <p className="mt-1 max-w-[72ch] text-body ink-dim">
                 Create one in the New document panel; it opens in the workbench
                 unsaved at v0.
               </p>
@@ -160,18 +160,18 @@ function ProjectDetailPage(): ReactElement {
                 >
                   <div className="flex min-w-0 flex-col">
                     <div className="flex items-baseline gap-2">
-                      <span className="truncate text-ui font-medium text-ink">
+                      <span className="truncate text-ui font-medium ink">
                         {document.name}
                       </span>
                       {document.versionCount > 0 ? (
                         /* The saved version is a measured fact, so it
                            reads as one: a mono tag, not a pill badge. */
-                        <span className="shrink-0 rounded-[2px] border border-rule bg-well-deep px-1 font-mono text-micro text-ink-dim tabular">
+                        <span className="shrink-0 rounded-[2px] border border-rule bg-well-deep px-1 font-mono text-micro ink-dim tabular">
                           {`v${String(document.latestVersion)}`}
                         </span>
                       ) : null}
                     </div>
-                    <div className="font-mono text-micro text-ink-faint tabular">
+                    <div className="font-mono text-micro ink-faint tabular">
                       {document.versionCount === 0
                         ? "never saved"
                         : plural(document.versionCount, "save")}
@@ -202,7 +202,7 @@ function ProjectDetailPage(): ReactElement {
 function BackLink(): ReactElement {
   return (
     <Link
-      className="inline-flex items-center gap-1 text-ui text-ink-dim transition-colors duration-(--dur-state) hover:text-ink focus-instrument"
+      className="inline-flex items-center gap-1 text-ui ink-dim transition-colors duration-(--dur-state) hover:ink focus-instrument"
       to="/projects"
     >
       <ChevronLeft className="size-3" />

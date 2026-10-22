@@ -58,10 +58,10 @@ export default function SignInForm({
 
   return (
     <div className="w-full max-w-sm">
-      <h1 className="font-display text-title font-semibold tracking-tight text-ink">
+      <h1 className="font-display text-title font-semibold tracking-tight ink">
         Welcome back
       </h1>
-      <p className="mt-1 mb-(--gap-group) text-ui text-ink-dim">
+      <p className="mt-1 mb-(--gap-group) text-ui ink-dim">
         Sign in to reach your projects and saved documents.
       </p>
 
@@ -139,7 +139,7 @@ export default function SignInForm({
 
       <div className="mt-(--gap-group) text-center">
         <Button
-          className="text-ui text-ink-dim underline-offset-4 hover:text-ink"
+          className="text-ui ink-dim underline-offset-4 hover:ink"
           onClick={onSwitchToSignUp}
           variant="ghost"
           size="sm"

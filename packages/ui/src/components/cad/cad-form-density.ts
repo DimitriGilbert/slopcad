@@ -43,5 +43,5 @@ export const COCKPIT_FORM = {
   // confirming action of each form into a full-width filled slab — exactly
   // what DESIGN.md forbids the accent to do.
   formClassName: "flex flex-col items-start gap-(--gap-group) space-y-0",
-  labelClassName: "text-label font-normal text-ink-dim",
+  labelClassName: "text-label font-normal ink-dim",
 } as const;

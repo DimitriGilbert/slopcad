@@ -75,14 +75,12 @@ function PanelHeader({
       )}
       {...props}
     >
-      <TitleTag className="label-section truncate text-ink-faint">
-        {title}
-      </TitleTag>
+      <TitleTag className="label-section truncate ink-faint">{title}</TitleTag>
       {children}
       {trailing === undefined ? null : (
         <span
           data-slot="panel-header-trailing"
-          className="ml-auto flex shrink-0 items-center gap-(--gap-tight) text-data text-ink-faint tabular"
+          className="ml-auto flex shrink-0 items-center gap-(--gap-tight) text-data ink-faint tabular"
         >
           {trailing}
         </span>
@@ -174,7 +172,7 @@ function PanelSection({
   const contentId = id === undefined ? undefined : `${id}-content`;
 
   const name = (
-    <span className="label-section truncate text-ink-faint">{title}</span>
+    <span className="label-section truncate ink-faint">{title}</span>
   );
 
   return (
@@ -207,7 +205,7 @@ function PanelSection({
             <ChevronRight
               aria-hidden="true"
               className={cn(
-                "size-3 shrink-0 text-ink-faint transition-transform",
+                "size-3 shrink-0 ink-faint transition-transform",
                 "duration-(--dur-state) ease-(--ease-instrument)",
                 isOpen && "rotate-90",
               )}
@@ -218,7 +216,7 @@ function PanelSection({
           name
         )}
         {trailing === undefined ? null : (
-          <span className="ml-auto flex shrink-0 items-center gap-(--gap-tight) text-data text-ink-faint tabular">
+          <span className="ml-auto flex shrink-0 items-center gap-(--gap-tight) text-data ink-faint tabular">
             {trailing}
           </span>
         )}
