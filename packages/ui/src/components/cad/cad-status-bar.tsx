@@ -155,7 +155,13 @@ function StatusField({
        * instrument states a fact.
        */}
       <span className="sr-only">{" = "}</span>
-      <span className="text-ink tabular">{children}</span>
+      {/* The value states its own size. It used to inherit it from the
+          bar's root, where `text-micro` sat beside `text-ink-dim` in one
+          merged string and was deleted — so every value in the band
+          rendered at the browser's 16px beside a 10px small-caps label.
+          `text-data` is what DESIGN.md gives a measured value, and the
+          pair now reads as the DRO cell it is. */}
+      <span className="text-data ink tabular">{children}</span>
     </span>
   );
 }
@@ -198,7 +204,9 @@ export function CadStatusBar({
   return (
     <div
       className={cn(
-        "flex h-(--tool-h) shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-panel px-(--pad-panel) font-mono text-micro text-ink-dim",
+        // `ink-dim`, not `text-ink-dim`: beside `text-micro` the colour
+        // utility deleted the size (see cockpit.css's ink utilities).
+        "flex h-(--tool-h) shrink-0 items-center gap-(--gap-group) overflow-hidden border-t border-rule bg-panel px-(--pad-panel) font-mono text-micro ink-dim",
         className,
       )}
       data-slot="cad-status-bar"

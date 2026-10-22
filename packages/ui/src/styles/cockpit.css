@@ -185,6 +185,12 @@
   --rail-w: 15rem;
   --rail-w-wide: 17.5rem;
   --rail-w-icon: 2.75rem;
+  /* The width the HUD's corner furniture claims over the viewport — the
+   * view-tools strip's own width, and the gutter the centre HUD slot must
+   * keep clear of it. ONE token with both consumers, because when only
+   * the strip knew its width the centre slot grew under it and the
+   * getting-started card covered half the display-mode track at boot. */
+  --hud-corner-w: 11rem;
   --pad-panel: 0.5rem;
   --pad-row: 0.375rem;
   --gap-tight: 0.125rem;
@@ -369,4 +375,39 @@
 @utility tabular {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+}
+
+/* The ink family, under DESIGN.md's own names — and the reason they exist
+ * as classes instead of as the `text-ink*` colour utilities.
+ *
+ * The class merger every component routes through (`cn`, a tailwind-merge
+ * work-alike) classifies a `text-<name>` utility by a FIXED table of
+ * font-size names: `text-xs`, `text-sm`, `text-base`, a t-shirt size, an
+ * arbitrary length. It has never heard of this product's six-size scale,
+ * so it files `text-ui` under *text colour* — the same group as
+ * `text-ink`. Two classes of one group means the later wins, which makes
+ * `cn("text-ui text-ink")` evaluate to `"text-ink"`: the type token is
+ * silently DELETED and the element falls back to the browser's 16px.
+ *
+ * That is not hypothetical. It is why the command palette rendered a
+ * third too large, why the status band's readouts outgrew their labels,
+ * and why the sketch strip's key caps swelled to icon size and collided
+ * with the icons they annotate.
+ *
+ * A class whose name is not `text-*` cannot be filed as a colour, so
+ * these three are immune: `text-ui ink` keeps both. Reach for them
+ * wherever an ink step shares one class string with a type token — and do
+ * NOT "simplify" them back to `text-ink`, which reintroduces the bug
+ * invisibly. (`label-section` above is immune for the same reason, which
+ * is why the one section-header voice in the product never broke.) */
+@utility ink {
+  color: var(--ink);
+}
+
+@utility ink-dim {
+  color: var(--ink-dim);
+}
+
+@utility ink-faint {
+  color: var(--ink-faint);
 }

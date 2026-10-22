@@ -1,6 +1,6 @@
 import { cn } from "cn";
 import { cva, type VariantProps } from "class-variance-authority";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 
 /**
  * `ToolButton` — the instrument's one interactive control for tools,
@@ -16,13 +16,34 @@ import type { ComponentProps, ReactNode } from "react";
  * Pressed state is `aria-pressed`, not a class, so the armed truth is in
  * the accessibility tree where tests and screen readers both read it.
  * Momentary actions (undo, export) pass no `aria-pressed` at all.
+ *
+ * ## Armed is not the same as current
+ *
+ * `tone="value"` is the second appearance rule, and it exists because the
+ * accent rule was being spent on things that are never off. A display
+ * mode, a light rig, a render quality, a revolve axis — these are
+ * SEGMENTED VALUES: exactly one member of the group is pressed at all
+ * times, there is no null state, and nothing about the pressed one is
+ * "live". Painted with the armed treatment they put three permanent amber
+ * pills in the viewport's corner, which is three more than DESIGN.md's
+ * "if two things on screen are amber, one of them is wrong" allows and
+ * leaves the real armed tool and the real selection no contrast to claim.
+ *
+ * A value group therefore reads as what it physically is: an inset track
+ * ({@link ToolValueGroup}, on the deepest well) with the current member
+ * RAISED out of it on `panel-raised` behind a `rule-strong` edge. Same
+ * `aria-pressed` truth, same testids, no accent — and the idle members
+ * gain the button affordance they never had as bare words in a row.
  */
 const toolButtonVariants = cva(
   [
     "group/tool relative inline-flex shrink-0 items-center gap-(--gap)",
     "rounded-sm border border-transparent bg-transparent",
     "font-medium whitespace-nowrap select-none",
-    "text-ink-dim transition-[background-color,color,border-color]",
+    // `ink-dim`, not `text-ink-dim`: the size variants below carry
+    // `text-ui`, and a `text-ink*` colour in the same merged string
+    // deletes it (see the ink utilities in cockpit.css).
+    "ink-dim transition-[background-color,color,border-color]",
     "duration-(--dur-state) ease-(--ease-instrument) focus-instrument",
     "hover:not-disabled:bg-well hover:not-disabled:text-ink",
     "active:not-disabled:translate-y-px",
@@ -46,6 +67,13 @@ const toolButtonVariants = cva(
          * (hover/focus); at rest it stays as quiet as every neighbour. */
         destructive:
           "hover:not-disabled:bg-destructive/12 hover:not-disabled:text-destructive",
+        /* One member of a segmented value group. The pressed member is
+         * the CURRENT value, not an armed state, so it is raised out of
+         * the group's track instead of accented — these overrides win
+         * over the armed rules above because a variant's classes merge
+         * after the base's. */
+        value:
+          "aria-pressed:border-rule-strong aria-pressed:bg-panel-raised aria-pressed:text-ink",
       },
     },
     defaultVariants: { size: "default", tone: "default" },
@@ -106,6 +134,52 @@ function ToolGroup({
 }
 
 /**
+ * `ToolValueGroup` — a segmented value, as a track.
+ *
+ * The container half of `tone="value"`: a hairline well-deep track the
+ * members sit flush inside, so the current member reads as RAISED out of
+ * it and the others read as seated in it. That inset is what makes a
+ * group of words a control — before it, an unpressed display mode was
+ * bare text in a grid with no affordance at all, and the pressed one had
+ * to borrow the armed accent just to be distinguishable.
+ *
+ * Pass `columns` for a wrapped track (the viewport strip's 2×2 display
+ * modes); omit it for one row (an axis pair). The group is still a
+ * `ToolGroup`, so it still carries the required accessible name.
+ */
+function ToolValueGroup({
+  className,
+  columns,
+  ...props
+}: ComponentProps<typeof ToolGroup> & {
+  /** Lay the members out in this many equal columns instead of one row. */
+  readonly columns?: number;
+}) {
+  return (
+    <ToolGroup
+      data-slot="tool-value-group"
+      separated={false}
+      className={cn(
+        "gap-px rounded-sm border border-rule bg-well-deep p-px",
+        columns === undefined
+          ? "flex"
+          : "grid grid-cols-(--tool-value-columns) items-stretch",
+        "[&>*]:min-w-0 [&>*]:flex-1 [&>*]:rounded-[3px]",
+        className,
+      )}
+      style={
+        columns === undefined
+          ? undefined
+          : ({
+              "--tool-value-columns": `repeat(${String(columns)}, minmax(0, 1fr))`,
+            } as CSSProperties)
+      }
+      {...props}
+    />
+  );
+}
+
+/**
  * `KeyCap` — a shortcut hint rendered as a physical cap.
  *
  * Decorative by contract: the cap is `aria-hidden`, and the control it
@@ -125,7 +199,11 @@ function KeyCap({
       className={cn(
         "inline-flex min-w-(--control-h-sm) items-center justify-center",
         "rounded-[2px] border border-rule bg-well-deep px-1",
-        "font-mono text-micro text-ink-faint tabular",
+        // `ink-faint`, not `text-ink-faint`: paired with `text-micro` in
+        // one merged string the colour utility deleted the SIZE, and a
+        // 16px cap over a 14px icon is what put the sketch strip's digits
+        // on top of the marks they annotate (see cockpit.css).
+        "font-mono text-micro ink-faint tabular",
         "h-(--control-h-sm) leading-none",
         className,
       )}
@@ -136,4 +214,4 @@ function KeyCap({
   );
 }
 
-export { KeyCap, ToolButton, ToolGroup, toolButtonVariants };
+export { KeyCap, ToolButton, ToolGroup, ToolValueGroup, toolButtonVariants };

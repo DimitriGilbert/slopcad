@@ -118,10 +118,16 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        // The group heading speaks the system's section voice (`label-section`
-        // by value: 10px, +0.08em, upper) in faint ink, on the panel-header
-        // height — the same strip every docked panel wears.
-        "text-ink overflow-hidden **:[[cmdk-group-heading]]:flex **:[[cmdk-group-heading]]:h-(--header-h) **:[[cmdk-group-heading]]:items-center **:[[cmdk-group-heading]]:px-(--pad-row) **:[[cmdk-group-heading]]:text-micro **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:tracking-[0.08em] **:[[cmdk-group-heading]]:text-ink-faint **:[[cmdk-group-heading]]:uppercase",
+        // The group heading speaks the system's section voice ON the
+        // system's own `label-section` utility — it used to respell that
+        // voice "by value" as four separate variants, and the respelling
+        // was the bug: `text-micro` and `text-ink-faint` landed in one
+        // merged string, the merger filed both as text COLOUR, and the
+        // size was dropped. Every palette heading rendered at the
+        // browser's 16px. The real utility cannot be stripped (it is not
+        // a `text-*` class) and carries the size, the tracking, the caps
+        // and the weight in one token.
+        "text-ink overflow-hidden **:[[cmdk-group-heading]]:flex **:[[cmdk-group-heading]]:h-(--header-h) **:[[cmdk-group-heading]]:items-center **:[[cmdk-group-heading]]:px-(--pad-row) **:[[cmdk-group-heading]]:label-section **:[[cmdk-group-heading]]:text-ink-faint",
         className,
       )}
       {...props}
@@ -157,7 +163,11 @@ function CommandItem({
         // full-width `--accent` fill with its own inset signal ring — the
         // loudest single element in the palette, and a third dialect of a
         // state the product already had two spellings for.
-        "group/command-item relative flex min-h-(--row-h) cursor-default items-center gap-(--gap) border-l-2 border-l-transparent rounded-sm px-(--pad-row) text-ui text-ink outline-hidden select-none in-data-[slot=dialog-content]:rounded-sm! data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:border-l-select-edge data-selected:bg-select-wash data-selected:text-select-ink [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        // `ink`, not `text-ink`: beside `text-ui` the colour utility ate
+        // the size and every command in the palette rendered at 16px —
+        // a third over the 12px DESIGN.md gives a menu item. See the ink
+        // utilities in cockpit.css.
+        "group/command-item relative flex min-h-(--row-h) cursor-default items-center gap-(--gap) border-l-2 border-l-transparent rounded-sm px-(--pad-row) text-ui ink outline-hidden select-none in-data-[slot=dialog-content]:rounded-sm! data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:border-l-select-edge data-selected:bg-select-wash data-selected:text-select-ink [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}
@@ -178,7 +188,10 @@ function CommandShortcut({
       className={cn(
         // The shortcut cap is the `KeyCap` treatment by value: the deepest
         // well, a hairline, faint tabular mono at `--control-h-sm`.
-        "ml-auto inline-flex h-(--control-h-sm) min-w-(--control-h-sm) items-center justify-center rounded-[2px] border border-rule bg-well-deep px-1 font-mono text-micro text-ink-faint tabular",
+        // `ink-faint`, not `text-ink-faint` — see KeyCap and the ink
+        // utilities in cockpit.css; the colour spelling ate `text-micro`
+        // and the caps rendered as tall as the labels beside them.
+        "ml-auto inline-flex h-(--control-h-sm) min-w-(--control-h-sm) items-center justify-center rounded-[2px] border border-rule bg-well-deep px-1 font-mono text-micro ink-faint tabular leading-none",
         className,
       )}
       {...props}
