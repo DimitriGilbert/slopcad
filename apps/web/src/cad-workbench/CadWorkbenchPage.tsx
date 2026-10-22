@@ -277,7 +277,12 @@ export function WorkbenchLayout({
             presses the live tool, and arms through the store's arm op. The
             row it sits in carries the divider, so the strip drops its own
             box. */}
-        <CadToolbar className="border-0 bg-transparent p-0" />
+        {/* The pinned-DOM baseline keeps the text appearance: a render
+            fixture is a baseline, not a surface to redesign. */}
+        <CadToolbar
+          className="border-0 bg-transparent p-0"
+          presentation="labels"
+        />
         <div
           aria-label="Feature timeline"
           className="border-border flex h-full min-w-0 items-center gap-1 border-l pl-3"

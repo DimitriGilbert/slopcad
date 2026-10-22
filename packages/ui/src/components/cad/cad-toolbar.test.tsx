@@ -79,7 +79,7 @@ function toolButton(toolId: string): HTMLButtonElement {
 afterEach(cleanup);
 
 describe("CadToolbar", () => {
-  it("renders a button per registered provider tool with the default labels", () => {
+  it("renders an icon button per registered provider tool, named by its label", () => {
     renderInProvider(fourToolStore());
     expect(
       screen.getByRole("group", { name: CAD_TOOLBAR_LABELS.toolbarLabel }),
@@ -90,10 +90,38 @@ describe("CadToolbar", () => {
       TRANSLATE_TOOL_ID,
       ROTATE_TOOL_ID,
     ]) {
-      expect(toolButton(toolId).textContent).toContain(
+      const button = toolButton(toolId);
+      // The label moved from text content to aria-label: the accessible
+      // name is unchanged, the strip's width is not.
+      expect(button.getAttribute("aria-label")).toBe(
         CAD_TOOLBAR_LABELS.tools[toolId]?.label,
       );
+      expect(button.textContent).toBe("");
+      expect(button.querySelector("svg")).not.toBeNull();
     }
+  });
+
+  it("renders the pinned text appearance on request", () => {
+    renderInProvider(fourToolStore(), { presentation: "labels" });
+    for (const toolId of [SELECT_TOOL_ID, MEASURE_TOOL_ID]) {
+      const button = toolButton(toolId);
+      expect(button.textContent).toContain(
+        CAD_TOOLBAR_LABELS.tools[toolId]?.label,
+      );
+      // No aria-label: the visible text IS the accessible name.
+      expect(button.hasAttribute("aria-label")).toBe(false);
+    }
+    // The key cap rides the labelled appearance only — a 28px icon button
+    // has no room for one, and aria-keyshortcuts carries the key anyway.
+    expect(document.querySelectorAll("[data-slot='key-cap']")).toHaveLength(4);
+  });
+
+  it("falls back to the label for a tool with no mark, in either presentation", () => {
+    render(<CadToolbar onActivate={() => {}} toolIds={["fillet"]} />);
+    const button = toolButton("fillet");
+    // An unknown id is an identifier, not prose, and never a blank square.
+    expect(button.textContent).toContain("fillet");
+    expect(button.hasAttribute("aria-label")).toBe(false);
   });
 
   it("presses exactly the live provider tool with a distinct variant", () => {
@@ -201,10 +229,14 @@ describe("CadToolbar", () => {
       },
     });
     expect(screen.getByRole("group", { name: "Werkzeuge" })).not.toBeNull();
-    expect(toolButton(MEASURE_TOOL_ID).textContent).toContain("Messen");
+    expect(toolButton(MEASURE_TOOL_ID).getAttribute("aria-label")).toBe(
+      "Messen",
+    );
     // The override replaced the whole per-tool map: unlisted tools fall
     // back to their raw id (the documented extension point).
-    expect(toolButton(SELECT_TOOL_ID).textContent).toContain("select");
+    expect(toolButton(SELECT_TOOL_ID).getAttribute("aria-label")).toBe(
+      "select",
+    );
   });
 
   it("renders a labeled, buttonless group without a provider and without props", () => {

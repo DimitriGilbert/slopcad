@@ -162,7 +162,8 @@ function PlateWorkbenchBody(): ReactElement {
     <div id="plate-workbench-root" className="w-full max-w-6xl space-y-4">
       <div className="flex w-full flex-wrap items-start gap-6">
         <div className="space-y-2">
-          <CadToolbar />
+          {/* Pinned fixture DOM: the text appearance, verbatim. */}
+          <CadToolbar presentation="labels" />
           <div id="plate-viewport" className="relative">
             <CadViewport
               className="h-[520px] w-[800px]"

@@ -50,6 +50,24 @@
  * focused button natively — the same click handler. The digit keys are
  * handled on the toolbar container, so they work from any focus inside it.
  *
+ * ## Presentation: icons by default, labels on request
+ *
+ * `presentation="icons"` (the default) renders icon-only `ToolButton`s
+ * from {@link CAD_MODEL_TOOL_ICONS}: the label moves from the button's
+ * text content to its `aria-label`, so the accessible name is unchanged
+ * and the strip stops spending ~70px per tool on a word the mark already
+ * says. This is what the cockpit's tool strip mounts.
+ *
+ * `presentation="labels"` is the previous appearance verbatim — text
+ * labels, visible key caps, and the `rounded-md border bg-card/60` pill —
+ * kept for the pinned render fixtures, which are baselines and are not
+ * redesigned. A tool id with no icon in the map always falls back to its
+ * label, in either presentation: an unknown mark is never a blank button.
+ *
+ * The toolbar is ONE CLUSTER of a strip, not a strip: it stays a named
+ * `role="group"` rather than becoming a second `role="toolbar"` nested
+ * inside the strip's, which would be an accessibility regression.
+ *
  * ## Tooltips
  *
  * Each button carries its description as a native `title` attribute. The
@@ -74,7 +92,8 @@ import {
 } from "@slopcad/cad-react";
 import { cn } from "cn";
 
-import { KeyCap, ToolButton } from "../cockpit/tool-button";
+import { KeyCap, ToolButton, ToolGroup } from "../cockpit/tool-button";
+import { CAD_MODEL_TOOL_ICONS, type CadModelToolId } from "./cad-tool-icons";
 
 /** The user-facing strings of one tool's button. */
 export interface CadToolbarToolLabels {
@@ -116,9 +135,14 @@ export interface CadToolbarProps {
   readonly onActivate?: (toolId: string) => void;
   /** Label token overrides, merged over {@link CAD_TOOLBAR_LABELS}. */
   readonly labels?: Partial<CadToolbarLabels>;
+  /** Icon-only strip cluster (default) or the pinned text appearance. */
+  readonly presentation?: CadToolbarPresentation;
   /** Extends the container classes. */
   readonly className?: string;
 }
+
+/** The toolbar's two documented appearances (see the module doc). */
+export type CadToolbarPresentation = "icons" | "labels";
 
 /** Digit shortcuts cover the first nine tools; beyond that, none. */
 const SHORTCUT_DIGIT_COUNT = 9;
@@ -126,6 +150,11 @@ const SHORTCUT_DIGIT_COUNT = 9;
 /** The digit shortcut of the tool at `index`, or `null` beyond the ninth. */
 function shortcutForIndex(index: number): string | null {
   return index < SHORTCUT_DIGIT_COUNT ? String(index + 1) : null;
+}
+
+/** Whether a tool id is one of the four the icon map knows a mark for. */
+function isModelToolId(toolId: string): toolId is CadModelToolId {
+  return Object.hasOwn(CAD_MODEL_TOOL_ICONS, toolId);
 }
 
 /** The tool id a digit key activates, or `null` when the key maps to none. */
@@ -163,6 +192,7 @@ export function CadToolbar({
   className,
   labels: labelOverrides,
   onActivate,
+  presentation = "icons",
   toolIds: toolIdsProp,
 }: CadToolbarProps) {
   const labels: CadToolbarLabels = { ...CAD_TOOLBAR_LABELS, ...labelOverrides };
@@ -188,16 +218,20 @@ export function CadToolbar({
     activate(toolId);
   };
 
+  const icons = presentation === "icons";
+
   return (
-    <div
-      aria-label={labels.toolbarLabel}
+    <ToolGroup
       className={cn(
-        "border-border bg-card/60 inline-flex items-center gap-0.5 rounded-md border p-0.5",
+        icons
+          ? "gap-(--gap-tight)"
+          : "border-border bg-card/60 inline-flex items-center gap-0.5 rounded-md border p-0.5",
         className,
       )}
       data-slot="cad-toolbar"
-      role="group"
+      label={labels.toolbarLabel}
       onKeyDown={handleKeyDown}
+      separated={false}
     >
       {toolIds.map((toolId, index) => {
         const active = toolId === pressedToolId;
@@ -206,10 +240,17 @@ export function CadToolbar({
           tooltip: toolId,
         };
         const shortcut = shortcutForIndex(index);
+        // An icon exists only for the four registry tools; a host's custom
+        // tool keeps its word rather than becoming a blank square.
+        const Mark = isModelToolId(toolId)
+          ? CAD_MODEL_TOOL_ICONS[toolId].icon
+          : null;
+        const iconOnly = icons && Mark !== null;
         return (
           <ToolButton
             key={toolId}
             aria-keyshortcuts={shortcut ?? undefined}
+            aria-label={iconOnly ? toolLabels.label : undefined}
             aria-pressed={active}
             data-active={active || undefined}
             data-tool-id={toolId}
@@ -221,14 +262,22 @@ export function CadToolbar({
                     activate(toolId);
                   }
             }
-            size="sm"
+            size={iconOnly ? "icon" : "sm"}
             title={toolLabels.tooltip}
           >
-            {toolLabels.label}
-            {shortcut !== null ? <KeyCap>{shortcut}</KeyCap> : null}
+            {iconOnly && Mark !== null ? (
+              // The mark carries the tool; the label carries the name, in
+              // aria-label, so the accessible name never changed.
+              <Mark aria-hidden="true" />
+            ) : (
+              <>
+                {toolLabels.label}
+                {shortcut !== null ? <KeyCap>{shortcut}</KeyCap> : null}
+              </>
+            )}
           </ToolButton>
         );
       })}
-    </div>
+    </ToolGroup>
   );
 }

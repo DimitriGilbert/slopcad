@@ -231,7 +231,8 @@ function UiViewportBody(): ReactElement {
         <div id="ui-viewport-panel" className="space-y-2">
           {/* Provider-driven toolbar: no props — it mirrors the registry,
               presses the live tool, and arms through the store's arm op. */}
-          <CadToolbar />
+          {/* Pinned fixture DOM: the text appearance, verbatim. */}
+          <CadToolbar presentation="labels" />
           <div id="ui-viewport" data-face-anchors={faceAnchors}>
             <CadViewport
               className="h-[520px] w-[800px]"
