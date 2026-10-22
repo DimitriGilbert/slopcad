@@ -77,6 +77,8 @@ import {
   ToolButton,
   ToolGroup,
 } from "@slopcad/ui/components/cockpit/tool-button";
+import { ToolOptionsPanel } from "@slopcad/ui/components/cockpit/tool-options-bar";
+import type { ToolOptionsDescriptor } from "@slopcad/ui/components/cockpit/tool-options-bar";
 import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
 import type { AgentChatSessionSlot } from "@slopcad/ui/agent/chat/session-slot";
 import type { AgentChatView } from "../../agent/chat/view-state";
@@ -158,6 +160,21 @@ export interface WorkbenchInspectorRailProps {
   readonly sessionSlot: AgentChatSessionSlot | null;
   /** The Selection section's content (the `propertyPanel` slot's node). */
   readonly propertyPanel: ReactNode;
+  /**
+   * The ARMED tool's descriptor, or `null` when nothing is armed. While a
+   * tool is live it takes over the Selection section — the layout law's
+   * rule that a feature is dialled in at the inspector, not in a modal —
+   * and it renders the SAME descriptor the TOP′ bar renders, so the two
+   * can never disagree about what the tool offers.
+   *
+   * The property panel underneath is HIDDEN, never unmounted: it is the
+   * cockpit's restore discipline (a re-shown panel keeps its scroll and
+   * its state), and its machine surface
+   * (`[data-slot="cad-property-panel"]`) keeps answering while a tool is
+   * armed — automation reads the selection's provenance in the middle of
+   * a tool gesture.
+   */
+  readonly armedTool: ToolOptionsDescriptor | null;
   /** The Measurement section's content (moved here from the LEFT rail). */
   readonly measurementSection: ReactNode;
   /** The Parameters section's content (the `parameterPanel` slot's node). */
@@ -180,6 +197,7 @@ export interface WorkbenchInspectorRailProps {
 }
 
 export function WorkbenchInspectorRail({
+  armedTool,
   collapsed,
   configurationPanel,
   document,
@@ -450,10 +468,15 @@ export function WorkbenchInspectorRail({
                 onSectionOpenChange("inspector-selection", open);
               }}
               open={isSectionOpen("inspector-selection")}
-              title="Selection"
-              trailing={String(selectionCount)}
+              title={armedTool === null ? "Selection" : armedTool.toolLabel}
+              trailing={armedTool === null ? String(selectionCount) : "armed"}
             >
-              {propertyPanel}
+              {armedTool === null ? null : (
+                <ToolOptionsPanel descriptor={armedTool} />
+              )}
+              <div className={armedTool === null ? undefined : "hidden"}>
+                {propertyPanel}
+              </div>
             </PanelSection>
             <PanelSection
               collapsible

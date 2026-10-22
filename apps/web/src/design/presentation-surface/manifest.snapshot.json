@@ -3624,6 +3624,12 @@
       "origin": "jsx",
       "values": [
         {
+          "value": "layer",
+          "files": [
+            "packages/ui/src/components/cad/cad-viewport-hud.tsx"
+          ]
+        },
+        {
           "value": "projected",
           "files": [
             "packages/ui/src/components/cad/cad-viewport-hud.tsx"
@@ -6389,6 +6395,12 @@
         },
         {
           "value": "tool-options-bar",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-options-bar.tsx"
+          ]
+        },
+        {
+          "value": "tool-options-panel",
           "files": [
             "packages/ui/src/components/cockpit/tool-options-bar.tsx"
           ]

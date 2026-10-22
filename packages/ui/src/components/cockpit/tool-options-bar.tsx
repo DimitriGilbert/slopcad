@@ -29,7 +29,7 @@
 import { cn } from "cn";
 import type { ComponentProps } from "react";
 
-import { Readout } from "./property-row";
+import { PropertyRow, Readout } from "./property-row";
 import { ToolButton, ToolGroup } from "./tool-button";
 
 /** A two-state option of the armed tool. */
@@ -167,4 +167,85 @@ function ToolOptionsBar({
   );
 }
 
-export { ToolOptionsBar };
+/** Props of {@link ToolOptionsPanel}. */
+export type ToolOptionsPanelProps = Omit<
+  ComponentProps<"div">,
+  "children" | "role" | "aria-label"
+> & {
+  /** The armed tool's descriptor, or `null` for "no tool is armed". */
+  readonly descriptor: ToolOptionsDescriptor | null;
+};
+
+/**
+ * `ToolOptionsPanel` — the SAME descriptor, rendered down a rail.
+ *
+ * The layout law puts the armed tool's form in the inspector as well as
+ * on the strip: the inspector is where a feature is dialled in, and a
+ * tool that is live has more to say than a 28px strip row has width for.
+ * This is deliberately not a second vocabulary — it renders the identical
+ * `ToolOptionsDescriptor` the bar renders, so a tool can never offer one
+ * thing at the top of the frame and another at its side. Readouts become
+ * `PropertyRow`s (label left, tabular value right); toggles and actions
+ * become one quiet run of controls.
+ */
+function ToolOptionsPanel({
+  className,
+  descriptor,
+  ...props
+}: ToolOptionsPanelProps) {
+  if (descriptor === null) return null;
+  const readouts = descriptor.controls.filter(
+    (control): control is ToolOptionsReadout => control.kind === "readout",
+  );
+  const controls = descriptor.controls.filter(
+    (control) => control.kind !== "readout",
+  );
+  return (
+    <div
+      aria-label={`${descriptor.toolLabel} options`}
+      className={cn("flex min-w-0 flex-col", className)}
+      data-slot="tool-options-panel"
+      data-tool-options={descriptor.toolLabel}
+      role="group"
+      {...props}
+    >
+      <p className="px-(--pad-panel) pt-(--pad-row) text-label text-ink-dim">
+        <span className="text-ink">{descriptor.toolLabel}</span>
+        {" — "}
+        {descriptor.hint}
+      </p>
+      {readouts.map((readout) => (
+        <PropertyRow
+          data-tool-option={readout.id}
+          key={readout.id}
+          label={readout.label}
+        >
+          <span className="font-mono text-data tabular">{readout.value}</span>
+        </PropertyRow>
+      ))}
+      {controls.length === 0 ? null : (
+        <div className="flex flex-wrap items-center gap-(--gap-tight) p-(--pad-panel)">
+          {controls.map((control) => (
+            <ToolButton
+              aria-pressed={
+                control.kind === "toggle" ? control.pressed : undefined
+              }
+              data-tool-option={control.id}
+              disabled={control.disabled}
+              key={control.id}
+              onClick={
+                control.kind === "toggle" ? control.onToggle : control.onRun
+              }
+              size="sm"
+              title={control.title}
+            >
+              {control.label}
+            </ToolButton>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export { ToolOptionsBar, ToolOptionsPanel };

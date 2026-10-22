@@ -2508,6 +2508,7 @@ export function CompleteCadWorkbench({
         />
         {viewport}
         <WorkbenchInspectorRail
+          armedTool={armedToolOptions}
           collapsed={rails.isCollapsed("inspector")}
           configurationPanel={configurationPanel}
           document={workbenchDocument}
